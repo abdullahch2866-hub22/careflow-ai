@@ -272,6 +272,15 @@ document.getElementById("documentInput").addEventListener("change", function() {
     if (this.files.length > 0) {
         document.getElementById("uploadStatus").textContent =
             "Uploaded: " + this.files[0].name + " ✓";
+      const caseArea = document.getElementById("uploadedCase");
+caseArea.innerHTML =
+    '<div class="case">' +
+    '<div>' +
+    '<div class="case-name">' + this.files[0].name + '</div>' +
+    '<div class="case-type">Healthcare document</div>' +
+    '</div>' +
+    '<div class="status">Review</div>' +
+    '</div>';
     }
 });
 </script>
@@ -282,7 +291,7 @@ document.getElementById("documentInput").addEventListener("change", function() {
         <div class="recent-header">
           Recent Cases
         </div>
-
+<div id="uploadedCase"></div>
         <div class="case">
           <div>
             <div class="case-name">Referral Document</div>
