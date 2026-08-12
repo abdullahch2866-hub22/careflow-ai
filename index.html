@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CareFlow AI</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+    }
+
+    body {
+      background: #f5f7fb;
+      color: #172033;
+    }
+
+    .header {
+      background: white;
+      border-bottom: 1px solid #e5e7eb;
+      padding: 18px 35px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .logo {
+      font-size: 24px;
+      font-weight: bold;
+    }
+
+    .logo span {
+      color: #2563eb;
+    }
+
+    .user {
+      font-size: 14px;
+      color: #64748b;
+    }
+
+    .layout {
+      display: flex;
+      min-height: calc(100vh - 70px);
+    }
+
+    .sidebar {
+      width: 230px;
+      background: #111827;
+      color: white;
+      padding: 30px 18px;
+    }
+
+    .sidebar h3 {
+      font-size: 13px;
+      color: #9ca3af;
+      margin-bottom: 15px;
+      text-transform: uppercase;
+    }
+
+    .nav-item {
+      padding: 13px 15px;
+      border-radius: 8px;
+      margin-bottom: 7px;
+      cursor: pointer;
+    }
+
+    .nav-item.active {
+      background: #2563eb;
+    }
+
+    .main {
+      flex: 1;
+      padding: 35px;
+    }
+
+    .welcome h1 {
+      font-size: 30px;
+      margin-bottom: 8px;
+    }
+
+    .welcome p {
+      color: #64748b;
+      margin-bottom: 30px;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 18px;
+      margin-bottom: 30px;
+    }
+
+    .card {
+      background: white;
+      padding: 22px;
+      border-radius: 12px;
+      border: 1px solid #e5e7eb;
+    }
+
+    .card-title {
+      color: #64748b;
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
+
+    .card-number {
+      font-size: 28px;
+      font-weight: bold;
+    }
+
+    .upload {
+      background: white;
+      border: 2px dashed #cbd5e1;
+      border-radius: 14px;
+      padding: 45px;
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .upload h2 {
+      margin-bottom: 10px;
+    }
+
+    .upload p {
+      color: #64748b;
+      margin-bottom: 20px;
+    }
+
+    .button {
+      display: inline-block;
+      background: #2563eb;
+      color: white;
+      padding: 12px 22px;
+      border-radius: 8px;
+      font-weight: bold;
+      cursor: pointer;
+      border: none;
+    }
+
+    .recent {
+      background: white;
+      border-radius: 14px;
+      border: 1px solid #e5e7eb;
+      overflow: hidden;
+    }
+
+    .recent-header {
+      padding: 20px;
+      border-bottom: 1px solid #e5e7eb;
+      font-weight: bold;
+    }
+
+    .case {
+      padding: 18px 20px;
+      border-bottom: 1px solid #f1f5f9;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .case:last-child {
+      border-bottom: none;
+    }
+
+    .case-name {
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+
+    .case-type {
+      color: #64748b;
+      font-size: 13px;
+    }
+
+    .status {
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: bold;
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    @media (max-width: 900px) {
+      .cards {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .sidebar {
+        width: 180px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <header class="header">
+    <div class="logo">CareFlow <span>AI</span></div>
+    <div class="user">Healthcare Administration</div>
+  </header>
+
+  <div class="layout">
+
+    <aside class="sidebar">
+      <h3>Workspace</h3>
+
+      <div class="nav-item active">Dashboard</div>
+      <div class="nav-item">Documents</div>
+      <div class="nav-item">Review Queue</div>
+      <div class="nav-item">Completed</div>
+      <div class="nav-item">Activity Log</div>
+
+      <br>
+
+      <h3>Settings</h3>
+      <div class="nav-item">Organization</div>
+      <div class="nav-item">Users</div>
+    </aside>
+
+    <main class="main">
+
+      <section class="welcome">
+        <h1>Good evening</h1>
+        <p>Welcome to your CareFlow AI workspace.</p>
+      </section>
+
+      <section class="cards">
+
+        <div class="card">
+          <div class="card-title">Documents Today</div>
+          <div class="card-number">24</div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Awaiting Review</div>
+          <div class="card-number">7</div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Completed</div>
+          <div class="card-number">17</div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Time Saved</div>
+          <div class="card-number">6.4h</div>
+        </div>
+
+      </section>
+
+      <section class="upload">
+
+        <h2>Upload a healthcare document</h2>
+
+        <p>
+          CareFlow AI will extract administrative information
+          and prepare it for human review.
+        </p>
+
+        <button class="button">
+          Upload Document
+        </button>
+
+      </section>
+
+      <section class="recent">
+
+        <div class="recent-header">
+          Recent Cases
+        </div>
+
+        <div class="case">
+          <div>
+            <div class="case-name">Referral Document</div>
+            <div class="case-type">Administrative document</div>
+          </div>
+
+          <div class="status">Completed</div>
+        </div>
+
+        <div class="case">
+          <div>
+            <div class="case-name">Insurance Document</div>
+            <div class="case-type">Insurance information</div>
+          </div>
+
+          <div class="status">Completed</div>
+        </div>
+
+        <div class="case">
+          <div>
+            <div class="case-name">Patient Intake Form</div>
+            <div class="case-type">Patient administration</div>
+          </div>
+
+          <div class="status">Review</div>
+        </div>
+
+      </section>
+
+    </main>
+
+  </div>
+
+</body>
+</html>
