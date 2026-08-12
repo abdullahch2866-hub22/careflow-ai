@@ -279,8 +279,11 @@ caseArea.innerHTML =
     '<div class="case-name">' + this.files[0].name + '</div>' +
     '<div class="case-type">Healthcare document</div>' +
     '</div>' +
-    '<div class="status">Review</div>' +
+     '<button class="status review-btn" type="button">Review</button>' +
     '</div>';
+      caseArea.querySelector(".review-btn").addEventListener("click", function() {
+    document.getElementById("reviewPanel").style.display = "block";
+});
     }
 });
 </script>
@@ -320,7 +323,57 @@ caseArea.innerHTML =
         </div>
 
       </section>
+<section id="reviewPanel" class="recent" style="display:none; margin-top:30px;">
 
+    <div class="recent-header">
+        Patient Document Review
+    </div>
+
+    <div class="case">
+        <div>
+            <div class="case-name">Patient Name</div>
+            <div class="case-type">John Carter</div>
+        </div>
+    </div>
+
+    <div class="case">
+        <div>
+            <div class="case-name">Document Type</div>
+            <div class="case-type">Patient Intake Report</div>
+        </div>
+    </div>
+
+    <div class="case">
+        <div>
+            <div class="case-name">Date</div>
+            <div class="case-type">August 13, 2026</div>
+        </div>
+    </div>
+
+    <div class="case">
+        <div>
+            <div class="case-name">Insurance Information</div>
+            <div class="case-type">HealthPlus Insurance — Policy #HP-45821</div>
+        </div>
+    </div>
+
+    <div class="case">
+        <div>
+            <div class="case-name">Missing Information</div>
+            <div class="case-type">Emergency contact phone number</div>
+        </div>
+        <div class="status">Needs Review</div>
+    </div>
+
+    <div class="case">
+        <div>
+            <div class="case-name">Review Status</div>
+            <div class="case-type">Pending human review</div>
+        </div>
+        <div class="status">Review</div>
+    </div>
+
+</section>
     </main>
 
   </div>
