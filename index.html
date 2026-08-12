@@ -387,15 +387,19 @@ Request Correction
     </main>
 
   </div>
-<script>
-document.getElementById("approveBtn").addEventListener("click", function() {
-    document.querySelector("#reviewPanel .case:last-of-type .status").textContent = "Approved";
-    this.textContent = "Approved";
-});
+ <script>
+window.addEventListener("load", function() {
 
-document.getElementById("correctionBtn").addEventListener("click", function() {
-    document.querySelector("#reviewPanel .case:last-of-type .status").textContent = "Correction Requested";
-    this.textContent = "Correction Requested";
+    document.getElementById("approveBtn").onclick = function() {
+        this.textContent = "Approved";
+        document.querySelector("#reviewPanel .case:last-of-type .status").textContent = "Approved";
+    };
+
+    document.getElementById("correctionBtn").onclick = function() {
+        this.textContent = "Correction Requested";
+        document.querySelector("#reviewPanel .case:last-of-type .status").textContent = "Correction Requested";
+    };
+
 });
 </script>
 </body>
