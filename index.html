@@ -281,8 +281,9 @@ caseArea.innerHTML =
     '</div>' +
      '<button class="status review-btn" type="button">Review</button>' +
     '</div>';
-      caseArea.querySelector(".review-btn").addEventListener("click", function() {
+       caseArea.querySelector(".review-btn").addEventListener("click", function() {
     document.getElementById("reviewPanel").style.display = "block";
+    this.textContent = "In Review";
 });
     }
 });
