@@ -373,11 +373,30 @@ caseArea.innerHTML =
         </div>
         <div class="status">Review</div>
     </div>
+  <div style="display:flex; gap:12px; padding:20px; flex-wrap:wrap;">
+    <button type="button" id="approveBtn" style="padding:12px 20px; border:0; border-radius:8px; background:#16a34a; color:white; cursor:pointer;">
+Approve Document
+</button>
+
+<button type="button" id="correctionBtn" style="padding:12px 20px; border:0; border-radius:8px; background:#f59e0b; color:white; cursor:pointer;">
+Request Correction
+</button>
+    </div>
 
 </section>
     </main>
 
   </div>
+<script>
+document.getElementById("approveBtn").addEventListener("click", function() {
+    document.querySelector("#reviewPanel .case:last-of-type .status").textContent = "Approved";
+    this.textContent = "Approved";
+});
 
+document.getElementById("correctionBtn").addEventListener("click", function() {
+    document.querySelector("#reviewPanel .case:last-of-type .status").textContent = "Correction Requested";
+    this.textContent = "Correction Requested";
+});
+</script>
 </body>
 </html>
