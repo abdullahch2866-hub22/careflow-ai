@@ -392,7 +392,8 @@ window.addEventListener("load", function() {
 
     document.getElementById("approveBtn").onclick = function() {
         this.textContent = "Approved";
-        document.querySelector("#reviewPanel .case:last-of-type .status").textContent = "Approved";
+        document.querySelector("#reviewPanel .case:nth-of-type(6) .status").textContent = "Approved";
+      this.textContent = "Approved";
     };
 
     document.getElementById("correctionBtn").onclick = function() {
