@@ -265,7 +265,16 @@
 <button class="button" onclick="document.getElementById('documentInput').click()">
     Upload Document
 </button>
+<p id="uploadStatus" style="margin-top:15px;color:#2563eb;"></p>
 
+<script>
+document.getElementById("documentInput").addEventListener("change", function() {
+    if (this.files.length > 0) {
+        document.getElementById("uploadStatus").textContent =
+            "Selected: " + this.files[0].name;
+    }
+});
+</script>
       </section>
 
       <section class="recent">
