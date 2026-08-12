@@ -387,21 +387,58 @@ Request Correction
     </main>
 
   </div>
- <script>
-window.addEventListener("load", function() {
+  <script>
 
-    document.getElementById("approveBtn").onclick = function() {
-        this.textContent = "Approved";
-        document.querySelector("#reviewPanel .case:nth-of-type(6) .status").textContent = "Approved";
-      this.textContent = "Approved";
-    };
+document.getElementById("approveBtn").addEventListener("click", function() {
 
-    document.getElementById("correctionBtn").onclick = function() {
-        this.textContent = "Correction Requested";
-        document.querySelector("#reviewPanel .case:last-of-type .status").textContent = "Correction Requested";
-    };
+    const cases = document.querySelectorAll("#reviewPanel .case");
+
+    cases.forEach(function(caseItem) {
+
+        const title = caseItem.querySelector(".case-name");
+
+        if (title && title.textContent.trim() === "Review Status") {
+
+            const status = caseItem.querySelector(".status");
+
+            if (status) {
+                status.textContent = "Approved";
+            }
+
+        }
+
+    });
+
+    this.textContent = "Approved";
 
 });
+
+
+document.getElementById("correctionBtn").addEventListener("click", function() {
+
+    const cases = document.querySelectorAll("#reviewPanel .case");
+
+    cases.forEach(function(caseItem) {
+
+        const title = caseItem.querySelector(".case-name");
+
+        if (title && title.textContent.trim() === "Review Status") {
+
+            const status = caseItem.querySelector(".status");
+
+            if (status) {
+                status.textContent = "Correction Requested";
+            }
+
+        }
+
+    });
+
+    this.textContent = "Correction Requested";
+
+});
+
 </script>
+  
 </body>
 </html>
