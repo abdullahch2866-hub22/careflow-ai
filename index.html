@@ -402,8 +402,14 @@ document.getElementById("approveBtn").addEventListener("click", function() {
             const status = caseItem.querySelector(".status");
 
             if (status) {
-                status.textContent = "Approved";
-            }
+    status.textContent = "Approved";
+}
+
+const type = caseItem.querySelector(".case-type");
+
+if (type) {
+    type.textContent = "Approved";
+}
 
         }
 
@@ -426,9 +432,15 @@ document.getElementById("correctionBtn").addEventListener("click", function() {
 
             const status = caseItem.querySelector(".status");
 
-            if (status) {
-                status.textContent = "Correction Requested";
-            }
+           if (status) {
+    status.textContent = "Correction Requested";
+}
+
+const type = caseItem.querySelector(".case-type");
+
+if (type) {
+    type.textContent = "Correction Requested";
+}
 
         }
 
