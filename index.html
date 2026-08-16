@@ -213,12 +213,12 @@
 
   <p id="loginStatus" style="margin-top:12px;"></p>
 </div>
-  <header class="header">
+  <header class="header" style="display:none;">
     <div class="logo">CareFlow <span>AI</span></div>
     <div class="user">Healthcare Administration</div>
   </header>
 
-  <div class="layout">
+   <div class="layout" style="display:none;">
 
     <aside class="sidebar">
       <h3>Workspace</h3>
@@ -426,6 +426,21 @@ const supabaseClient = window.supabase.createClient(
     SUPABASE_URL,
     SUPABASE_KEY
 );
+    async function updateAuthUI() {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+
+    if (user) {
+        document.getElementById("loginPanel").style.display = "none";
+        document.querySelector(".header").style.display = "flex";
+        document.querySelector(".layout").style.display = "flex";
+    } else {
+        document.getElementById("loginPanel").style.display = "block";
+        document.querySelector(".header").style.display = "none";
+        document.querySelector(".layout").style.display = "none";
+    }
+}
+
+updateAuthUI();
     document.getElementById("loginBtn").addEventListener("click", async function() {
 
     const email = document.getElementById("loginEmail").value.trim();
@@ -445,6 +460,7 @@ const supabaseClient = window.supabase.createClient(
     }
 
     loginStatus.textContent = "Signed in successfully ✓";
+      await updateAuthUI();
 }); 
  
 document.getElementById("approveBtn").addEventListener("click", function() {
