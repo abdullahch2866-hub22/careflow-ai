@@ -287,22 +287,52 @@
     if (this.files.length > 0) {
 
         const file = this.files[0];
+      const { data: membership, error: membershipError } = await supabaseClient
+    .from("organization_members")
+    .select("organization_id")
+    .single();
+
+if (membershipError || !membership) {
+    document.getElementById("uploadStatus").textContent =
+        "Upload failed: hospital account not found.";
+    return;
+}
+
+const organizationId = membership.organization_id;
 
         document.getElementById("uploadStatus").textContent =
-            "Uploaded: " + file.name + " ✓";
+    "Uploading: " + file.name + "...";
+
+const filePath = organizationId + "/" + Date.now() + "-" + file.name;
+
+const { data: storageData, error: storageError } = await supabaseClient.storage
+    .from("documents")
+    .upload(filePath, file);
+
+if (storageError) {
+    document.getElementById("uploadStatus").textContent =
+        "File upload failed: " + storageError.message;
+    return;
+}
       const { data, error } = await supabaseClient
     .from("documents")
     .insert([
         {
             file_name: file.name,
-            document_type: "Healthcare document",
-            status: "Review"
+document_type: "Healthcare document",
+status: "Review",
+organization_id: organizationId
         }
     ]);
 
-if (error) {
-    console.error("Supabase error:", error);
-} 
+ if (error) {
+    document.getElementById("uploadStatus").textContent =
+        "Database save failed: " + error.message;
+    return;
+}
+
+document.getElementById("uploadStatus").textContent =
+    "Uploaded successfully: " + file.name + " ✓";
       const caseArea = document.getElementById("uploadedCase");
 caseArea.innerHTML =
     '<div class="case">' +
