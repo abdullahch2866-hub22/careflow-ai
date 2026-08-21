@@ -324,12 +324,31 @@ status: "Review",
  organization_id: organizationId,
 storage_path: filePath
         }
-    ]);
+    ])
+.select("id")
+.single();
 
  if (error) {
     document.getElementById("uploadStatus").textContent =
         "Database save failed: " + error.message;
     return;
+}
+      const { error: caseError } = await supabaseClient
+  .from("cases")
+  .insert([
+    {
+      file_name: file.name,
+      document_type: "Healthcare document",
+      status: "Review",
+      organization_id: organizationId,
+      document_id: data.id
+    }
+  ]);
+
+if (caseError) {
+  document.getElementById("uploadStatus").textContent =
+    "Case save failed: " + caseError.message;
+  return;
 }
 
 document.getElementById("uploadStatus").textContent =
