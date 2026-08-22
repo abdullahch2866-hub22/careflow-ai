@@ -350,9 +350,27 @@ if (caseError) {
     "Case save failed: " + caseError.message;
   return;
 }
+      document.getElementById("uploadStatus").textContent =
+  "Uploaded successfully. AI is processing the document...";
+
+const { data: aiResult, error: aiError } =
+  await supabaseClient.functions.invoke("process-document", {
+    body: {
+      document_id: data.id
+    }
+  });
+
+if (aiError) {
+  document.getElementById("uploadStatus").textContent =
+    "Upload succeeded, but AI processing failed: " + aiError.message;
+  return;
+}
 
 document.getElementById("uploadStatus").textContent =
-    "Uploaded successfully: " + file.name + " ✓";
+  "Uploaded and processed successfully: " + file.name + " ✓";
+
+console.log("CareFlow AI extraction:", aiResult);
+
       const caseArea = document.getElementById("uploadedCase");
 caseArea.innerHTML =
     '<div class="case">' +
