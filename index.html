@@ -360,9 +360,27 @@ const { data: aiResult, error: aiError } =
     }
   });
 
-if (aiError) {
+ if (aiError) {
+  let aiErrorDetails = aiError.message;
+
+  try {
+    if (aiError.context) {
+      const errorBody = await aiError.context.clone().json();
+
+      aiErrorDetails +=
+        " | " +
+        (errorBody.details ||
+         errorBody.error ||
+         JSON.stringify(errorBody));
+    }
+  } catch (readError) {
+    console.error("Could not read AI error response:", readError);
+  }
+
   document.getElementById("uploadStatus").textContent =
-    "Upload succeeded, but AI processing failed: " + aiError.message;
+    "AI processing failed: " + aiErrorDetails;
+
+  console.error("CareFlow AI error:", aiError);
   return;
 }
 
