@@ -388,6 +388,22 @@ document.getElementById("uploadStatus").textContent =
   "Uploaded and processed successfully: " + file.name + " ✓";
 
 console.log("CareFlow AI extraction:", aiResult);
+      const extracted = aiResult?.extracted || {};
+
+document.getElementById("reviewPatientName").textContent =
+  extracted.patient_name || "Not found";
+
+document.getElementById("reviewDocumentType").textContent =
+  "Healthcare document";
+
+document.getElementById("reviewDocumentDate").textContent =
+  extracted.document_date || "Not found";
+
+document.getElementById("reviewInsurance").textContent =
+  extracted.insurance_information || "Not found";
+
+document.getElementById("reviewMissingInfo").textContent =
+  extracted.missing_information || "None identified";
 
       const caseArea = document.getElementById("uploadedCase");
 caseArea.innerHTML =
@@ -447,41 +463,41 @@ caseArea.innerHTML =
         Patient Document Review
     </div>
 
-    <div class="case">
-        <div>
-            <div class="case-name">Patient Name</div>
-            <div class="case-type">John Carter</div>
-        </div>
-    </div>
+   <div class="case">
+  <div>
+    <div class="case-name">Patient Name</div>
+    <div class="case-type" id="reviewPatientName">Waiting for AI extraction...</div>
+  </div>
+</div>
 
-    <div class="case">
-        <div>
-            <div class="case-name">Document Type</div>
-            <div class="case-type">Patient Intake Report</div>
-        </div>
-    </div>
+<div class="case">
+  <div>
+    <div class="case-name">Document Type</div>
+    <div class="case-type" id="reviewDocumentType">Healthcare document</div>
+  </div>
+</div>
 
-    <div class="case">
-        <div>
-            <div class="case-name">Date</div>
-            <div class="case-type">August 13, 2026</div>
-        </div>
-    </div>
+<div class="case">
+  <div>
+    <div class="case-name">Date</div>
+    <div class="case-type" id="reviewDocumentDate">—</div>
+  </div>
+</div>
 
-    <div class="case">
-        <div>
-            <div class="case-name">Insurance Information</div>
-            <div class="case-type">HealthPlus Insurance — Policy #HP-45821</div>
-        </div>
-    </div>
+<div class="case">
+  <div>
+    <div class="case-name">Insurance Information</div>
+    <div class="case-type" id="reviewInsurance">—</div>
+  </div>
+</div>
 
-    <div class="case">
-        <div>
-            <div class="case-name">Missing Information</div>
-            <div class="case-type">Emergency contact phone number</div>
-        </div>
-        <div class="status">Needs Review</div>
-    </div>
+<div class="case">
+  <div>
+    <div class="case-name">Missing Information</div>
+    <div class="case-type" id="reviewMissingInfo">—</div>
+  </div>
+  <div class="status">Needs Review</div>
+</div>
 
     <div class="case">
         <div>
