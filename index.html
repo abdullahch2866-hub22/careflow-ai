@@ -283,6 +283,7 @@
 <p id="uploadStatus" style="margin-top:15px;color:#2563eb;"></p>
 
 <script>
+  let currentDocumentId = null;
  document.getElementById("documentInput").addEventListener("change", async function() {
     if (this.files.length > 0) {
 
@@ -350,6 +351,7 @@ if (caseError) {
     "Case save failed: " + caseError.message;
   return;
 }
+      currentDocumentId = data.id;
       document.getElementById("uploadStatus").textContent =
   "Uploaded successfully. AI is processing the document...";
 
@@ -565,66 +567,82 @@ updateAuthUI();
       await updateAuthUI();
 }); 
  
-document.getElementById("approveBtn").addEventListener("click", function() {
+ function updateReviewStatusUI(statusText) {
+  const cases = document.querySelectorAll("#reviewPanel .case");
 
-    const cases = document.querySelectorAll("#reviewPanel .case");
+  cases.forEach(function(caseItem) {
+    const title = caseItem.querySelector(".case-name");
 
-    cases.forEach(function(caseItem) {
+    if (title && title.textContent.trim() === "Review Status") {
+      const status = caseItem.querySelector(".status");
+      const type = caseItem.querySelector(".case-type");
 
-        const title = caseItem.querySelector(".case-name");
+      if (status) {
+        status.textContent = statusText;
+      }
 
-        if (title && title.textContent.trim() === "Review Status") {
+      if (type) {
+        type.textContent = statusText;
+      }
+    }
+  });
 
-            const status = caseItem.querySelector(".status");
+  const recentStatus = document.querySelector("#uploadedCase .status");
 
-            if (status) {
-    status.textContent = "Approved";
+  if (recentStatus) {
+    recentStatus.textContent = statusText;
+  }
 }
 
-const type = caseItem.querySelector(".case-type");
+async function saveCaseStatus(newStatus, button) {
+  if (!currentDocumentId) {
+    alert("Please upload a document before changing its status.");
+    return;
+  }
 
-if (type) {
-    type.textContent = "Approved";
+  const originalText = button.textContent;
+
+  button.disabled = true;
+  button.textContent = "Saving...";
+
+  const { data: updatedCase, error } = await supabaseClient
+    .from("cases")
+    .update({
+      status: newStatus
+    })
+    .eq("document_id", currentDocumentId)
+    .select("id, status")
+    .single();
+
+  if (error) {
+    console.error("Case status update failed:", error);
+
+    alert("Could not update case status: " + error.message);
+
+    button.disabled = false;
+    button.textContent = originalText;
+    return;
+  }
+
+  updateReviewStatusUI(updatedCase.status);
+
+  button.textContent = updatedCase.status;
+  button.disabled = false;
 }
 
-        }
+document.getElementById("approveBtn").addEventListener(
+  "click",
+  async function() {
+    await saveCaseStatus("Completed", this);
+  }
+);
 
-    });
-
-    this.textContent = "Approved";
-
-});
-
-
-document.getElementById("correctionBtn").addEventListener("click", function() {
-
-    const cases = document.querySelectorAll("#reviewPanel .case");
-
-    cases.forEach(function(caseItem) {
-
-        const title = caseItem.querySelector(".case-name");
-
-        if (title && title.textContent.trim() === "Review Status") {
-
-            const status = caseItem.querySelector(".status");
-
-           if (status) {
-    status.textContent = "Correction Requested";
-}
-
-const type = caseItem.querySelector(".case-type");
-
-if (type) {
-    type.textContent = "Correction Requested";
-}
-
-        }
-
-    });
-
-    this.textContent = "Correction Requested";
-
-});
+document.getElementById("correctionBtn").addEventListener(
+  "click",
+  async function() {
+    await saveCaseStatus("Correction Required", this);
+  }
+);
 
 </script>
   
