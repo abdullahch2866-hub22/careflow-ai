@@ -1,0 +1,158 @@
+// Run: node --test tests/processor-access.test.mjs (Node.js 24+).
+// Runs the actual handler with synthetic user-scoped clients. No network or data writes.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import { stripTypeScriptTypes } from 'node:module';
+
+const source = fs.readFileSync(new URL('../supabase/functions/process-document/index.ts', import.meta.url), 'utf8');
+const executable = stripTypeScriptTypes(source.replace(/^import .*;\s*$/gm, ''), { mode: 'strip' })
+  .replace('export default', 'const processor =');
+const organization = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa';
+const otherOrganization = 'bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb';
+const documentId = 'cccccccc-cccc-4ccc-cccc-cccccccccccc';
+
+function fixture(options = {}) {
+  const calls = { provider: 0, downloads: [], queries: [], writes: [] };
+  const caseRow = { id: 8, organization_id: organization, document_id: documentId };
+  const documentRow = {
+    id: documentId, organization_id: organization,
+    storage_path: options.path ?? organization + '/123-Synthetic.pdf',
+    file_name: 'Synthetic.pdf'
+  };
+  const from = table => {
+    let filters = [], payload = null;
+    async function run() {
+      calls.queries.push({ table, filters: [...filters], action: payload ? 'update' : 'select' });
+      if ((table === 'cases' && options.caseDenied) || (table === 'documents' && options.documentDenied)) {
+        return { data: null, error: { message: 'Access denied' } };
+      }
+      const row = table === 'cases' ? caseRow : documentRow;
+      if (!filters.every(([key, value]) => row[key] === value)) return { data: null, error: { message: 'No matching row' } };
+      if (payload) {
+        if (options.writeDenied) return { data: null, error: { message: 'Access was removed' } };
+        if (options.zeroRows) return { data: null, error: null };
+        calls.writes.push({ table, filters: [...filters], payload });
+      }
+      return { data: { ...row }, error: null };
+    }
+    const builder = {
+      select() { return builder; },
+      eq(key, value) { filters.push([key, value]); return builder; },
+      update(value) { payload = value; return builder; },
+      single: run,
+      then(resolve, reject) { return run().then(resolve, reject); }
+    };
+    return builder;
+  };
+  const scoped = { from, storage: { from(bucket) {
+    assert.equal(bucket, 'documents');
+    return { async download(path) {
+      calls.downloads.push(path);
+      if (options.storageDenied) return { data: null, error: { message: 'Storage access denied' } };
+      return { data: new Blob(['%PDF synthetic test only']), error: null };
+    } };
+  } } };
+  const ctx = {
+    supabase: scoped,
+    get supabaseAdmin() { throw new Error('Handler must not access the administrator client'); }
+  };
+  const context = vm.createContext({
+    Response, Request, Uint8Array, btoa,
+    console: { error() {} },
+    Deno: { env: { get() { return 'synthetic-placeholder'; } } },
+    withSupabase(config, handler) { assert.equal(config.auth, 'user'); return handler; },
+    async fetch(url, request) {
+      assert.equal(url, 'https://api.openai.com/v1/responses');
+      calls.provider += 1;
+      assert.equal(JSON.parse(request.body).store, false);
+      return Response.json({ output: [{ content: [{ type: 'output_text', text: JSON.stringify({
+        patient_name: 'Synthetic Patient', document_date: '2026-08-31',
+        insurance_information: 'Synthetic insurer', missing_information: 'Synthetic missing field'
+      }) }] }] });
+    }
+  });
+  vm.runInContext(executable, context);
+  return {
+    calls,
+    async invoke(body = { document_id: documentId }) {
+      const handler = vm.runInContext('processor.fetch', context);
+      const response = await handler(new Request('https://fixture.invalid/process', {
+        method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' }
+      }), ctx);
+      return { status: response.status, body: await response.json() };
+    }
+  };
+}
+
+test('an authorized hospital can process its file and save to the exact case', async () => {
+  const f = fixture();
+  const response = await f.invoke();
+  assert.equal(response.status, 200);
+  assert.equal(response.body.success, true);
+  assert.equal(response.body.extracted.patient_name, 'Synthetic Patient');
+  assert.equal(f.calls.provider, 1);
+  assert.equal(f.calls.writes.length, 1);
+  assert.deepEqual(f.calls.writes[0].filters, [
+    ['id', 8], ['document_id', documentId], ['organization_id', organization]
+  ]);
+});
+
+test('a record pointing at another hospital folder is rejected before reading or processing', async () => {
+  const f = fixture({ path: otherOrganization + '/private.pdf' });
+  const response = await f.invoke();
+  assert.equal(response.status, 404);
+  assert.equal(f.calls.downloads.length, 0);
+  assert.equal(f.calls.provider, 0);
+  assert.equal(f.calls.writes.length, 0);
+});
+
+test('folder traversal and ambiguous separators are rejected before a file read', async () => {
+  for (const suffix of ['/../'+otherOrganization+'/file.pdf', '/./file.pdf', '//file.pdf', '/folder\\file.pdf']) {
+    const f = fixture({ path: organization + suffix });
+    assert.equal((await f.invoke()).status, 404);
+    assert.equal(f.calls.downloads.length, 0);
+    assert.equal(f.calls.provider, 0);
+  }
+});
+
+test('Storage permission denial prevents the file being sent for AI processing', async () => {
+  const f = fixture({ storageDenied: true });
+  assert.equal((await f.invoke()).status, 404);
+  assert.equal(f.calls.downloads.length, 1);
+  assert.equal(f.calls.provider, 0);
+});
+
+test('inaccessible cases or documents cannot trigger a file read', async () => {
+  for (const options of [{ caseDenied: true }, { documentDenied: true }]) {
+    const f = fixture(options);
+    assert.equal((await f.invoke()).status, 404);
+    assert.equal(f.calls.downloads.length, 0);
+    assert.equal(f.calls.provider, 0);
+  }
+});
+
+test('removed update permissions prevent returning extraction results', async () => {
+  const f = fixture({ writeDenied: true });
+  const response = await f.invoke();
+  assert.equal(response.status, 500);
+  assert.equal(response.body.success, undefined);
+  assert.equal(response.body.extracted, undefined);
+  assert.equal(f.calls.writes.length, 0);
+});
+
+test('a zero-row update cannot report successful processing', async () => {
+  const response = await fixture({ zeroRows: true }).invoke();
+  assert.equal(response.status, 500);
+  assert.equal(response.body.extracted, undefined);
+});
+
+test('invalid document identifiers are rejected before accessing data', async () => {
+  for (const body of [{}, { document_id: '' }, { document_id: ['not-a-string'] }]) {
+    const f = fixture();
+    assert.equal((await f.invoke(body)).status, 400);
+    assert.equal(f.calls.queries.length, 0);
+    assert.equal(f.calls.provider, 0);
+  }
+});

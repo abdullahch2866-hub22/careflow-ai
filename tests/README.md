@@ -27,3 +27,19 @@ blocks outbound connections through CSP.
 
 These fixtures never use live credentials or patient data. The production page
 does not import any files from `tests/`.
+
+## Document processor access checks
+
+Run all checks with Node.js 24 or later:
+
+```sh
+node --test tests/*.test.mjs
+```
+
+`processor-access.test.mjs` runs the actual TypeScript handler after stripping
+types, with synthetic user-scoped clients and a stubbed AI response. It checks
+successful processing, foreign folder rejection, invalid paths, Storage denial,
+inaccessible records, access removed before saving, zero-row saves, and input
+validation. It throws if the handler tries to use the administrator client.
+No actual JWT verification, Deno deployment, Storage HTTP call, or AI call occurs
+in these tests; the deployed handler still needs a fake-PDF end-to-end check.

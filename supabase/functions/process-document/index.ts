@@ -24,7 +24,7 @@ export default {
       const body = (await req.json()) as ReqPayload;
       const document_id = body.document_id;
 
-      if (!document_id) {
+      if (typeof document_id !== "string" || !document_id.trim()) {
         return Response.json(
           { error: "document_id is required" },
           { status: 400 }
@@ -71,27 +71,41 @@ export default {
         );
       }
 
-      if (!documentRow.storage_path) {
+      if (typeof documentRow.storage_path !== "string" || !documentRow.storage_path) {
         return Response.json(
           { error: "Document storage path is missing" },
           { status: 400 }
         );
       }
 
-      // Download the already-authorized PDF.
-      // IMPORTANT: the bucket name is lowercase "documents".
+      // A document record is not proof of access to the file named in it.
+      // Require the hospital folder, and let Storage enforce the caller's RLS.
+      const pathSegments = documentRow.storage_path.split("/");
+      if (
+        pathSegments[0] !== documentRow.organization_id ||
+        pathSegments.length < 2 ||
+        pathSegments.slice(1).some((segment: string) =>
+          !segment || segment === "." || segment === ".."
+        ) ||
+        documentRow.storage_path.includes("\\")
+      ) {
+        return Response.json(
+          { error: "Document file not found or access denied" },
+          { status: 404 }
+        );
+      }
+
       const { data: fileBlob, error: downloadError } =
-        await ctx.supabaseAdmin.storage
+        await ctx.supabase.storage
           .from("documents")
           .download(documentRow.storage_path);
 
       if (downloadError || !fileBlob) {
         return Response.json(
           {
-            error: "Could not download document",
-            details: downloadError?.message,
+            error: "Document file not found or access denied",
           },
-          { status: 500 }
+          { status: 404 }
         );
       }
 
@@ -231,19 +245,21 @@ Rules:
         ),
       };
 
-      // The case was authorized using RLS above.
-      // Save the extracted information to that exact case.
-      const { error: updateError } = await ctx.supabaseAdmin
+      // Recheck permissions at save time using the caller's scoped client.
+      // Do not return extracted data if access was removed during processing.
+      const { data: updatedCase, error: updateError } = await ctx.supabase
         .from("cases")
         .update(finalData)
         .eq("id", caseRow.id)
-        .eq("organization_id", caseRow.organization_id);
+        .eq("document_id", document_id)
+        .eq("organization_id", caseRow.organization_id)
+        .select("id")
+        .single();
 
-      if (updateError) {
+      if (updateError || !updatedCase) {
         return Response.json(
           {
             error: "Could not save AI results",
-            details: updateError.message,
           },
           { status: 500 }
         );
