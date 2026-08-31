@@ -1,0 +1,7 @@
+{
+  "name": "careflow-ai",
+  "private": true,
+  "scripts": { "test": "node --test tests/*.test.mjs" },
+  "engines": { "node": ">=24" },
+  "devDependencies": { "@electric-sql/pglite": "0.5.8" }
+}

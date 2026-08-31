@@ -30,10 +30,11 @@ does not import any files from `tests/`.
 
 ## Document processor access checks
 
-Run all checks with Node.js 24 or later:
+Run all checks with Node.js 24 or later (the database tests use pinned PGlite):
 
 ```sh
-node --test tests/*.test.mjs
+npm ci --ignore-scripts
+npm test
 ```
 
 `processor-access.test.mjs` runs the actual TypeScript handler after stripping
@@ -43,3 +44,17 @@ inaccessible records, access removed before saving, zero-row saves, and input
 validation. It throws if the handler tries to use the administrator client.
 No actual JWT verification, Deno deployment, Storage HTTP call, or AI call occurs
 in these tests; the deployed handler still needs a fake-PDF end-to-end check.
+
+## Correction and approval checks
+
+`review-database.test.mjs` executes `supabase/review-corrections.sql` in a real
+in-memory PostgreSQL engine with synthetic tables and identities. It tests
+database approval constraints, separate save/approve steps, preserved prior
+values, immutable history, actor stamping, optimistic revisions, and RLS for
+two synthetic hospitals. It does not validate the production JWT verifier or
+the complete production permission configuration.
+
+The frontend tests additionally cover correction persistence, required notes
+and confirmation, partial corrections, failed/stale saves, cancellation, and
+clearing drafts on sign-out. Use the browser fixture to inspect the form and
+compare visible saved values after a refresh. All fixture data is fictional.

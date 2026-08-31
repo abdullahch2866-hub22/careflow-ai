@@ -44,7 +44,7 @@ export default {
       // to access this case through Row Level Security.
       const { data: caseRow, error: caseError } = await ctx.supabase
         .from("cases")
-        .select("id, organization_id, document_id")
+        .select("id, organization_id, document_id, review_revision, review_notes, status, patient_name, document_date, insurance_information, missing_information")
         .eq("document_id", document_id)
         .single();
 
@@ -52,6 +52,14 @@ export default {
         return Response.json(
           { error: "Case not found or access denied" },
           { status: 404 }
+        );
+      }
+
+      if (caseRow.review_revision !== 0 || caseRow.status !== "Review" || caseRow.review_notes ||
+          caseRow.patient_name || caseRow.document_date || caseRow.insurance_information || caseRow.missing_information) {
+        return Response.json(
+          { error: "This case already has saved results or review decisions. Use Edit Details to make corrections." },
+          { status: 409 }
         );
       }
 
@@ -253,6 +261,7 @@ Rules:
         .eq("id", caseRow.id)
         .eq("document_id", document_id)
         .eq("organization_id", caseRow.organization_id)
+        .eq("review_revision", caseRow.review_revision)
         .select("id")
         .single();
 

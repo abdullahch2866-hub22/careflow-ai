@@ -15,7 +15,7 @@ const documentId = 'cccccccc-cccc-4ccc-cccc-cccccccccccc';
 
 function fixture(options = {}) {
   const calls = { provider: 0, downloads: [], queries: [], writes: [] };
-  const caseRow = { id: 8, organization_id: organization, document_id: documentId };
+  const caseRow = { id: 8, organization_id: organization, document_id: documentId, review_revision: 0, status: 'Review', ...options.caseFields };
   const documentRow = {
     id: documentId, organization_id: organization,
     storage_path: options.path ?? organization + '/123-Synthetic.pdf',
@@ -66,6 +66,7 @@ function fixture(options = {}) {
     async fetch(url, request) {
       assert.equal(url, 'https://api.openai.com/v1/responses');
       calls.provider += 1;
+      if (options.concurrentEdit) caseRow.review_revision += 1;
       assert.equal(JSON.parse(request.body).store, false);
       return Response.json({ output: [{ content: [{ type: 'output_text', text: JSON.stringify({
         patient_name: 'Synthetic Patient', document_date: '2026-08-31',
@@ -95,7 +96,7 @@ test('an authorized hospital can process its file and save to the exact case', a
   assert.equal(f.calls.provider, 1);
   assert.equal(f.calls.writes.length, 1);
   assert.deepEqual(f.calls.writes[0].filters, [
-    ['id', 8], ['document_id', documentId], ['organization_id', organization]
+    ['id', 8], ['document_id', documentId], ['organization_id', organization], ['review_revision', 0]
   ]);
 });
 
@@ -155,4 +156,21 @@ test('invalid document identifiers are rejected before accessing data', async ()
     assert.equal(f.calls.queries.length, 0);
     assert.equal(f.calls.provider, 0);
   }
+});
+
+test('processing cannot overwrite previously saved results or human review decisions', async () => {
+  for (const caseFields of [{review_revision:1},{patient_name:'Existing synthetic patient'},{review_notes:'Human correction'},{status:'Completed'},{status:'Correction Required'}]) {
+    const f = fixture({caseFields});
+    assert.equal((await f.invoke()).status,409);
+    assert.equal(f.calls.provider,0);
+    assert.equal(f.calls.downloads.length,0);
+  }
+});
+
+test('a correction made during AI processing prevents overwriting or returning stale extraction', async () => {
+  const f = fixture({concurrentEdit:true});
+  const response = await f.invoke();
+  assert.equal(response.status,500);
+  assert.equal(response.body.extracted,undefined);
+  assert.equal(f.calls.writes.length,0);
 });

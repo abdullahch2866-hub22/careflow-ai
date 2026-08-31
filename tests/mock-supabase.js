@@ -2,9 +2,10 @@
 const fixtureOrg = "fixture-hospital-a";
 let fixtureCases = JSON.parse(sessionStorage.getItem("careflow-fixture-cases") || "null") || [
   { id: 8, document_id: "fixture-document-8", organization_id: fixtureOrg, file_name: "Example_A.pdf", document_type: "Healthcare document", status: "Correction Required", created_at: "2026-08-31T00:22:45Z", patient_name: "Sample Patient A", document_date: "2026-08-12", insurance_information: "Sample insurer A", missing_information: "Sample missing contact" },
-  { id: 7, document_id: "fixture-document-7", organization_id: fixtureOrg, file_name: "<img src=x onerror=alert(1)>.pdf", document_type: "Healthcare document", status: "Review", created_at: "2026-08-26T00:00:00Z", patient_name: "Sample Patient B", document_date: null, insurance_information: "Sample insurer B", missing_information: null },
+  { id: 7, document_id: "fixture-document-7", organization_id: fixtureOrg, file_name: "<img src=x onerror=alert(1)>.pdf", document_type: "Healthcare document", status: "Review", created_at: "2026-08-26T00:00:00Z", patient_name: "Sample Patient B", document_date: "2026-08-12", insurance_information: "Sample insurer B", missing_information: null },
   { id: 6, document_id: "fixture-document-6", organization_id: "fixture-hospital-b", file_name: "OTHER_HOSPITAL_PRIVATE.pdf", status: "Review", created_at: "2026-08-20T00:00:00Z" }
 ];
+fixtureCases.forEach(row => { row.review_revision ??= 1; row.review_confirmed ??= false; row.review_notes ??= null; });
 let fixtureFailSave = false;
 let fixtureFailList = false;
 let fixtureEmpty = false;
@@ -35,7 +36,7 @@ function fixtureQuery(table) {
         if (table === "documents" && action === "insert") return resolve({ data: { id: "fixture-document-new" }, error: null });
         if (table !== "cases") throw new Error("Unexpected fixture table");
         if (action === "insert") {
-          fixtureCases.push({ ...payload[0], id: 9, created_at: "2026-09-01T00:00:00Z" });
+          fixtureCases.push({ ...payload[0], id: 9, created_at: "2026-09-01T00:00:00Z", review_revision: 0, review_confirmed: false, review_notes: null });
           storeFixtureCases();
           return resolve({ data: null, error: null });
         }
@@ -48,7 +49,10 @@ function fixtureQuery(table) {
           return resolve({ data: null, error: { message: "Fixture: list unavailable" } });
         }
         let rows = fixtureEmpty ? [] : fixtureCases.filter(row => filters.every(([key, value]) => row[key] === value));
-        if (action === "update") { rows.forEach(row => Object.assign(row, payload)); storeFixtureCases(); }
+        if (action === "update") {
+          rows.forEach(row => Object.assign(row, payload, { review_revision: row.review_revision + 1, updated_by: "fixture-user", updated_at: "2026-08-31T12:00:00Z" }));
+          storeFixtureCases();
+        }
         rows = [...rows].sort((a, b) => {
           for (const [key, ascending] of order) {
             if (a[key] < b[key]) return ascending ? -1 : 1;
@@ -74,7 +78,7 @@ window.supabase = { createClient() { return {
   functions: { async invoke() {
     recordFixtureQuery("invoke process-document");
     const extracted = { patient_name: "Uploaded Sample Patient", document_date: "2026-08-31", insurance_information: "Uploaded sample insurer", missing_information: "Sample missing contact" };
-    Object.assign(fixtureCases.find(row => row.id === 9), extracted);
+    Object.assign(fixtureCases.find(row => row.id === 9), extracted, { review_revision: 1 });
     storeFixtureCases();
     return { data: { success: true, extracted }, error: null };
   } }

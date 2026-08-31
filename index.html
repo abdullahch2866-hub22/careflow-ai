@@ -200,8 +200,27 @@
     .status[data-status="Review"] { background: #dbeafe; color: #1e40af; }
     .status[data-status="Correction Required"] { background: #fef3c7; color: #92400e; }
     #caseListStatus:empty { display: none; }
+    [hidden] { display: none !important; }
+    .review-form { padding: 24px 20px; background: #f8fafc; border-block: 1px solid #dbe3ee; }
+    .review-form h3 { margin-bottom: 8px; }
+    .review-help { color: #475569; font-size: 14px; line-height: 1.6; }
+    .review-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 20px; }
+    .review-field { display: flex; flex-direction: column; gap: 7px; font-size: 14px; font-weight: bold; }
+    .review-field.wide { grid-column: 1 / -1; }
+    .review-field input, .review-field textarea { width: 100%; padding: 11px; border: 1px solid #94a3b8; border-radius: 7px; font-size: 16px; background: white; color: #172033; }
+    .review-field textarea { min-height: 95px; resize: vertical; }
+    .review-check { display: flex; align-items: flex-start; gap: 10px; margin: 18px 0; line-height: 1.5; font-size: 14px; }
+    .review-check input { margin-top: 4px; width: 18px; height: 18px; flex-shrink: 0; }
+    .review-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+    .button.secondary { background: #e2e8f0; color: #172033; }
+    #approvalGuidance { margin-bottom: 12px; }
+    #reviewNotes, #reviewMissingInfo, #reviewInsurance { white-space: pre-wrap; }
+    input:focus-visible, textarea:focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; }
     @media (max-width: 600px) {
       .case { align-items: flex-start; flex-direction: column; }
+      .review-grid { grid-template-columns: 1fr; }
+      .main { min-width: 0; padding: 18px; }
+      .sidebar { display: none; }
     }
 
     @media (max-width: 900px) {
@@ -364,7 +383,33 @@
         </div>
         <div id="reviewStatusBadge" class="status" data-status="Review">Review</div>
     </div>
-  <div style="display:flex; gap:12px; padding:20px; flex-wrap:wrap;">
+    <div class="case">
+      <div><div class="case-name">Latest correction note</div><div id="reviewNotes" class="case-type">No corrections recorded.</div></div>
+    </div>
+    <div style="padding:20px;">
+      <button type="button" id="editDetailsBtn" class="button" disabled>Edit Details</button>
+    </div>
+    <form id="correctionForm" class="review-form" hidden autocomplete="off">
+      <h3>Correct document details</h3>
+      <p class="review-help">Compare these details with the source PDF or a supplied correction. Saving changes reopens the case for review; it does not approve it.</p>
+      <div class="review-grid">
+        <label class="review-field" for="editPatientName">Patient name<input id="editPatientName" maxlength="200"></label>
+        <label class="review-field" for="editDocumentType">Document type<input id="editDocumentType" maxlength="200"></label>
+        <label class="review-field" for="editDocumentDate">Document date<input id="editDocumentDate" type="date"></label>
+        <label class="review-field wide" for="editInsurance">Insurance information (if applicable)<textarea id="editInsurance" maxlength="4000"></textarea></label>
+        <label class="review-field wide" for="editMissingInfo">Information still missing<textarea id="editMissingInfo" maxlength="4000" aria-describedby="missingHelp"></textarea></label>
+        <p id="missingHelp" class="review-help">Keep unresolved items here. Remove an item only after recording the supplied information and its source in the correction note. Leave this box empty when no items remain.</p>
+        <label class="review-field wide" for="editReviewNotes">New correction note (required)<textarea id="editReviewNotes" required maxlength="4000" aria-describedby="noteHelp"></textarea></label>
+        <p id="noteHelp" class="review-help">Explain what changed, how missing items were resolved, and where the corrected information came from. Do not invent patient details. Previous values and notes are retained in the protected change history.</p>
+      </div>
+      <label class="review-check"><input id="correctionsConfirmed" type="checkbox" required>I checked these corrections against the source or supplied information.</label>
+      <div class="review-actions"><button id="saveDetailsBtn" class="button" type="submit">Save Corrections</button><button id="cancelEditBtn" class="button secondary" type="button">Cancel</button></div>
+    </form>
+    <div style="padding:0 20px;">
+      <p id="approvalGuidance" class="review-help"></p>
+      <label class="review-check"><input id="reviewConfirmed" type="checkbox" disabled>I checked the saved details and correction notes and confirm they are ready for approval.</label>
+    </div>
+  <div class="review-actions" style="padding:20px;">
     <button type="button" id="approveBtn" disabled style="padding:12px 20px; border:0; border-radius:8px; background:#16a34a; color:white; cursor:pointer;">
 Approve Document
 </button>
@@ -383,7 +428,7 @@ Request Correction
 const SUPABASE_URL = "https://qyrxexraolqyymyozrtl.supabase.co";
 const SUPABASE_KEY = "sb_publishable_ucOmAjy6eXWdy-OPr9qCrQ_HkceYeN8";
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const CASE_COLUMNS = "id, document_id, organization_id, file_name, document_type, status, created_at, patient_name, document_date, insurance_information, missing_information";
+const CASE_COLUMNS = "id, document_id, organization_id, file_name, document_type, status, created_at, patient_name, document_date, insurance_information, missing_information, review_notes, review_revision, review_confirmed, updated_at, updated_by";
 const CASE_LIST_LIMIT = 50;
 let organizationId = null;
 let currentCase = null;
@@ -394,6 +439,16 @@ let loadingCases = false;
 let authRequest = 0;
 let listRequest = 0;
 let reviewRequest = 0;
+let editing = false;
+const EDIT_FIELDS = { editPatientName: "patient_name", editDocumentType: "document_type", editDocumentDate: "document_date", editInsurance: "insurance_information", editMissingInfo: "missing_information", editReviewNotes: "review_notes" };
+
+function approvalProblem(row) {
+  if (!row?.document_id) return "This case has no linked source document.";
+  if (typeof row.review_revision !== "number") return "The review update is not available yet. Refresh after deployment.";
+  if ((row.missing_information || "").trim()) return "Resolve the missing information using Edit Details before approving.";
+  if (!(row.patient_name || "").trim() || !(row.document_type || "").trim() || !row.document_date) return "Add the patient name, document type, and document date before approving.";
+  return "";
+}
 
 function setStatusBadge(element, status) {
   element.textContent = status || "Review";
@@ -402,21 +457,29 @@ function setStatusBadge(element, status) {
 
 function updateControls() {
   const busy = uploading || saving || loadingCases;
-  document.getElementById("uploadBtn").disabled = busy || !organizationId;
-  document.getElementById("reloadCasesBtn").disabled = busy || !organizationId;
+  document.getElementById("uploadBtn").disabled = busy || editing || !organizationId;
+  document.getElementById("reloadCasesBtn").disabled = busy || editing || !organizationId;
   document.querySelectorAll(".review-btn").forEach(function(button) {
-    button.disabled = busy;
+    button.disabled = busy || editing;
   });
-  document.getElementById("approveBtn").disabled = busy || !currentCase?.document_id || currentCase.status === "Completed";
-  document.getElementById("correctionBtn").disabled = busy || !currentCase?.document_id || currentCase.status === "Correction Required";
+  const unavailable = busy || editing || !currentCase?.document_id || typeof currentCase?.review_revision !== "number";
+  const problem = approvalProblem(currentCase);
+  document.getElementById("approveBtn").disabled = unavailable || !!problem || currentCase?.status === "Completed" || !document.getElementById("reviewConfirmed").checked;
+  document.getElementById("correctionBtn").disabled = unavailable || currentCase?.status === "Correction Required";
+  document.getElementById("editDetailsBtn").disabled = unavailable;
+  document.getElementById("reviewConfirmed").disabled = unavailable || !!problem || currentCase?.status === "Completed";
+  document.getElementById("approvalGuidance").textContent = currentCase ? problem || (currentCase.status === "Completed" ? "This case is completed. Editing details will reopen it for review." : "Check the saved details, then tick the confirmation box to enable approval.") : "";
+  ["saveDetailsBtn", "cancelEditBtn", "correctionsConfirmed", ...Object.keys(EDIT_FIELDS)].forEach(function(id) { document.getElementById(id).disabled = busy || !editing; });
 }
 
 function clearReview() {
   reviewRequest += 1;
   currentCase = null;
+  closeEditor();
+  document.getElementById("reviewConfirmed").checked = false;
   document.getElementById("reviewPanel").style.display = "none";
   document.getElementById("reviewActionStatus").textContent = "";
-  ["reviewFileName", "reviewPatientName", "reviewDocumentType", "reviewDocumentDate", "reviewInsurance", "reviewMissingInfo", "reviewStatusText", "reviewStatusBadge"].forEach(function(id) {
+  ["reviewFileName", "reviewPatientName", "reviewDocumentType", "reviewDocumentDate", "reviewInsurance", "reviewMissingInfo", "reviewStatusText", "reviewStatusBadge", "reviewNotes"].forEach(function(id) {
     document.getElementById(id).textContent = "";
   });
   updateControls();
@@ -494,14 +557,16 @@ async function loadCases() {
 
 function renderReview(caseRow) {
   currentCase = caseRow;
+  document.getElementById("reviewConfirmed").checked = false;
   document.getElementById("reviewFileName").textContent = (caseRow.file_name || "Untitled document") + " · Case #" + caseRow.id;
   document.getElementById("reviewPatientName").textContent = caseRow.patient_name || "Not found";
   document.getElementById("reviewDocumentType").textContent = caseRow.document_type || "Healthcare document";
   document.getElementById("reviewDocumentDate").textContent = caseRow.document_date || "Not found";
   document.getElementById("reviewInsurance").textContent = caseRow.insurance_information || "Not found";
   document.getElementById("reviewMissingInfo").textContent = caseRow.missing_information || "None recorded";
+  document.getElementById("reviewNotes").textContent = caseRow.review_notes || "No corrections recorded.";
   const missingBadge = document.getElementById("missingInfoBadge");
-  missingBadge.hidden = !caseRow.missing_information;
+  missingBadge.hidden = !(caseRow.missing_information || "").trim();
   document.getElementById("reviewStatusText").textContent = caseRow.status || "Review";
   setStatusBadge(document.getElementById("reviewStatusBadge"), caseRow.status);
   document.getElementById("reviewPanel").style.display = "block";
@@ -509,7 +574,7 @@ function renderReview(caseRow) {
 }
 
 async function openCase(caseId) {
-  if (uploading || saving || loadingCases || !organizationId) return;
+  if (uploading || saving || loadingCases || editing || !organizationId) return;
   clearReview();
   const request = reviewRequest;
   const requestedOrganization = organizationId;
@@ -657,10 +722,68 @@ document.getElementById("documentInput").addEventListener("change", async functi
   }
 });
 
+function closeEditor() {
+  editing = false;
+  document.getElementById("correctionForm").hidden = true;
+  Object.keys(EDIT_FIELDS).forEach(function(id) { document.getElementById(id).value = ""; });
+  document.getElementById("correctionsConfirmed").checked = false;
+}
+
+function editDetails() {
+  if (saving || uploading || loadingCases || editing || !currentCase?.document_id) return;
+  editing = true;
+  Object.entries(EDIT_FIELDS).forEach(function([id, field]) { document.getElementById(id).value = field === "review_notes" ? "" : currentCase[field] || ""; });
+  document.getElementById("reviewConfirmed").checked = false;
+  document.getElementById("correctionForm").hidden = false;
+  document.getElementById("reviewActionStatus").textContent = "Your changes are not saved yet. Save Corrections or Cancel before opening another case.";
+  updateControls();
+  document.getElementById("editPatientName").focus();
+}
+
+async function saveCorrections(event) {
+  event.preventDefault();
+  if (!editing || saving || uploading || loadingCases || !currentCase?.document_id || !organizationId) return;
+  const message = document.getElementById("reviewActionStatus");
+  const payload = {};
+  for (const [id, field] of Object.entries(EDIT_FIELDS)) {
+    const value = document.getElementById(id).value.trim();
+    if (value.length > (field === "patient_name" || field === "document_type" ? 200 : 4000)) {
+      message.textContent = "One of the fields is too long. Shorten it before saving.";
+      return;
+    }
+    payload[field] = value || null;
+  }
+  if (!payload.review_notes || payload.review_notes === currentCase.review_notes?.trim()) {
+    message.textContent = "Add a new correction note explaining what changed and the source of the corrected information.";
+    return;
+  }
+  if (!document.getElementById("correctionsConfirmed").checked) {
+    message.textContent = "Tick the confirmation box after checking the corrected information.";
+    return;
+  }
+  if (payload.document_date && (!/^\d{4}-\d{2}-\d{2}$/.test(payload.document_date) || Number.isNaN(Date.parse(payload.document_date)) || new Date(payload.document_date).toISOString().slice(0, 10) !== payload.document_date)) {
+    message.textContent = "Enter a valid document date.";
+    return;
+  }
+  payload.status = payload.missing_information ? "Correction Required" : "Review";
+  payload.review_confirmed = false;
+  await saveCaseChange(payload, true);
+}
+
 async function saveCaseStatus(newStatus) {
-  if (saving || uploading || loadingCases || !currentCase?.document_id || !organizationId || currentCase.status === newStatus) return;
+  if (editing || saving || uploading || loadingCases || !currentCase?.document_id || !organizationId || currentCase.status === newStatus) return;
+  if (newStatus === "Completed" && (approvalProblem(currentCase) || !document.getElementById("reviewConfirmed").checked)) {
+    document.getElementById("reviewActionStatus").textContent = approvalProblem(currentCase) || "Confirm you have checked the saved details before approving.";
+    return;
+  }
+  await saveCaseChange({ status: newStatus, review_confirmed: newStatus === "Completed" }, false);
+}
+
+async function saveCaseChange(payload, fromEditor) {
+  if (typeof currentCase?.review_revision !== "number") return;
   const selectedId = currentCase.id;
   const selectedDocumentId = currentCase.document_id;
+  const revision = currentCase.review_revision;
   const requestedOrganization = organizationId;
   const request = reviewRequest;
   const message = document.getElementById("reviewActionStatus");
@@ -668,19 +791,20 @@ async function saveCaseStatus(newStatus) {
   updateControls();
   message.textContent = "Saving...";
   try {
-    const { data, error } = await supabaseClient.from("cases").update({ status: newStatus })
+    const { data, error } = await supabaseClient.from("cases").update(payload)
       .eq("id", selectedId).eq("document_id", selectedDocumentId)
-      .eq("organization_id", requestedOrganization).select("id, status").single();
-    if (error || !data) throw error || new Error("Case not found or access denied.");
+      .eq("organization_id", requestedOrganization).eq("review_revision", revision).select(CASE_COLUMNS).single();
+    if (error || !data) throw error || new Error("Case changed or access was removed.");
     if (request !== reviewRequest || requestedOrganization !== organizationId) return;
-    currentCase = { ...currentCase, status: data.status };
-    savedCases = savedCases.map(function(row) { return row.id === data.id ? { ...row, status: data.status } : row; });
+    if (fromEditor) closeEditor();
+    currentCase = data;
+    savedCases = savedCases.map(function(row) { return row.id === data.id ? data : row; });
     renderCases();
     renderReview(currentCase);
-    message.textContent = "Saved: " + data.status + ".";
+    message.textContent = fromEditor ? "Corrections saved. Check the saved details before approving. Status: " + data.status + "." : "Saved: " + data.status + ".";
   } catch (error) {
     if (request === reviewRequest && requestedOrganization === organizationId) {
-      message.textContent = "Could not save the decision. " + (error.message || "Please try again.");
+      message.textContent = "Could not save. " + (error.message || "Please try again.") + " If the case changed elsewhere, cancel your edit and reopen it before trying again.";
     }
   } finally {
     saving = false;
@@ -690,6 +814,11 @@ async function saveCaseStatus(newStatus) {
 
 document.getElementById("approveBtn").addEventListener("click", function() { saveCaseStatus("Completed"); });
 document.getElementById("correctionBtn").addEventListener("click", function() { saveCaseStatus("Correction Required"); });
+document.getElementById("editDetailsBtn").addEventListener("click", editDetails);
+document.getElementById("cancelEditBtn").addEventListener("click", function() { closeEditor(); document.getElementById("reviewActionStatus").textContent = "Changes cancelled. Saved details were not changed."; updateControls(); });
+document.getElementById("correctionForm").addEventListener("submit", saveCorrections);
+document.getElementById("reviewConfirmed").addEventListener("change", updateControls);
+window.addEventListener("beforeunload", function(event) { if (editing || saving) { event.preventDefault(); event.returnValue = ""; } });
 supabaseClient.auth.onAuthStateChange(function(event) {
   if (event === "SIGNED_OUT") {
     authRequest += 1;
