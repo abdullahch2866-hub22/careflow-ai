@@ -300,8 +300,8 @@
   <h2 id="passwordPanelTitle" style="margin-bottom:8px;">Set your CareFlow password</h2>
   <p id="passwordPanelHelp" style="color:#64748b; margin-bottom:18px; line-height:1.5;"></p>
   <form id="passwordSetupForm">
-    <input type="password" id="newPassword" autocomplete="new-password" placeholder="New password" minlength="12" required style="padding:10px; margin-right:10px; min-width:240px;">
-    <input type="password" id="confirmNewPassword" autocomplete="new-password" placeholder="Confirm new password" minlength="12" required style="padding:10px; margin-right:10px; min-width:240px;">
+    <input type="password" id="newPassword" autocomplete="new-password" placeholder="New password" minlength="15" required style="padding:10px; margin-right:10px; min-width:240px;">
+    <input type="password" id="confirmNewPassword" autocomplete="new-password" placeholder="Confirm new password" minlength="15" required style="padding:10px; margin-right:10px; min-width:240px;">
     <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
       <button type="submit" id="savePasswordBtn" class="button">Save password</button>
       <button type="button" id="passwordCancelBtn" class="button secondary">Back to login</button>
@@ -584,6 +584,41 @@ let settingsRequest = 0;
 let staffActionPending = false;
 let activeView = "dashboard";
 let editing = false;
+let currentAuthUserId = null;
+const WORKSPACE_STATE_KEY = "careflow.workspace.v1";
+
+function readWorkspaceState(userId) {
+  try {
+    const raw = sessionStorage.getItem(WORKSPACE_STATE_KEY);
+    if (!raw) return null;
+    const state = JSON.parse(raw);
+    if (!state || state.userId !== userId || !VIEW_CONFIG[state.view]) return null;
+    return {
+      view: state.view,
+      caseId: state.caseId ?? null,
+      editorOpen: state.editorOpen === true
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function persistWorkspaceState() {
+  if (!currentAuthUserId) return;
+  try {
+    sessionStorage.setItem(WORKSPACE_STATE_KEY, JSON.stringify({
+      userId: currentAuthUserId,
+      view: VIEW_CONFIG[activeView] ? activeView : "dashboard",
+      caseId: currentCase?.id ?? null,
+      editorOpen: editing === true
+    }));
+  } catch (_) { /* Workspace resume is best-effort only. */ }
+}
+
+function clearWorkspaceState() {
+  try { sessionStorage.removeItem(WORKSPACE_STATE_KEY); } catch (_) { /* Ignore storage errors. */ }
+}
+
 const EDIT_FIELDS = { editPatientName: "patient_name", editDocumentType: "document_type", editDocumentDate: "document_date", editInsurance: "insurance_information", editMissingInfo: "missing_information", editReviewNotes: "review_notes" };
 
 function approvalProblem(row) {
@@ -786,6 +821,7 @@ async function switchWorkspaceView(view) {
   activeView = view;
   clearReview();
   renderWorkspaceView();
+  persistWorkspaceState();
   if (view === "activity") await loadActivityLog();
   if (view === "organization") await loadOrganizationSettings();
   if (view === "users") {
@@ -1258,6 +1294,7 @@ async function openCase(caseId) {
     if (request !== reviewRequest || requestedOrganization !== organizationId) return;
     if (error || !data) throw error || new Error("Case not found or access denied.");
     renderReview(data);
+    persistWorkspaceState();
     message.textContent = !data.document_id ? "This older case has no linked document. Review decisions are unavailable." :
       !data.patient_name && !data.document_date && !data.insurance_information && !data.missing_information ?
         "No extraction details are saved for this case. Check the source document before approving." : "";
@@ -1280,7 +1317,7 @@ function setPasswordPanelVisible(visible, mode = "setup") {
   document.getElementById("passwordPanelHelp").textContent = mode === "recovery"
     ? "Choose a new password for your CareFlow hospital account."
     : "Your invitation is accepted. Choose your own password before opening the hospital workspace.";
-  document.getElementById("passwordStatus").textContent = "Use at least 12 characters and do not reuse a password from another account.";
+  document.getElementById("passwordStatus").textContent = "Use at least 15 characters with uppercase, lowercase, a number, and a symbol. Do not reuse a password from another account.";
   document.getElementById("newPassword").value = "";
   document.getElementById("confirmNewPassword").value = "";
   setTimeout(function() { document.getElementById("newPassword").focus(); }, 0);
@@ -1315,8 +1352,8 @@ async function saveNewPassword(event) {
   const confirmation = document.getElementById("confirmNewPassword").value;
   const status = document.getElementById("passwordStatus");
   const button = document.getElementById("savePasswordBtn");
-  if (password.length < 12) {
-    status.textContent = "Use at least 12 characters.";
+  if (password.length < 15 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/[0-9]/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+    status.textContent = "Use at least 15 characters with uppercase, lowercase, a number, and a symbol.";
     return;
   }
   if (password !== confirmation) {
@@ -1369,10 +1406,8 @@ async function updateAuthUI() {
   loadingActivity = false;
   loadingSettings = false;
   staffActionPending = false;
-  activeView = "dashboard";
   resetDashboardMetrics();
   clearReview();
-  renderWorkspaceView();
   document.getElementById("caseListStatus").textContent = "";
   document.querySelector(".header").style.display = "none";
   document.querySelector(".layout").style.display = "none";
@@ -1381,10 +1416,18 @@ async function updateAuthUI() {
     const { data: { user }, error } = await supabaseClient.auth.getUser();
     if (request !== authRequest) return;
     if (!user) {
+      currentAuthUserId = null;
+      activeView = "dashboard";
+      clearWorkspaceState();
+      renderWorkspaceView();
       setPasswordPanelVisible(false);
       return;
     }
     if (error) throw error;
+    currentAuthUserId = user.id;
+    const restoreState = readWorkspaceState(user.id);
+    activeView = restoreState?.view || "dashboard";
+    renderWorkspaceView();
     document.getElementById("currentUserEmail").textContent = user.email || "Signed in";
     const invitedNeedsPassword = !!user.user_metadata?.careflow_invited_organization && user.user_metadata?.careflow_password_set !== true;
     if (recoveryFlowRequested || invitedNeedsPassword) {
@@ -1403,6 +1446,20 @@ async function updateAuthUI() {
     renderWorkspaceView();
     updateControls();
     await Promise.all([loadCases(), loadDashboardMetrics()]);
+    if (request !== authRequest || !organizationId) return;
+    if (activeView === "activity") await loadActivityLog();
+    if (activeView === "organization") await loadOrganizationSettings();
+    if (activeView === "users") {
+      await loadOrganizationSettings();
+      await loadOrganizationMembers();
+    }
+    if (restoreState?.caseId && !["activity", "organization", "users"].includes(activeView)) {
+      await openCase(restoreState.caseId);
+      if (restoreState.editorOpen && currentCase && String(currentCase.id) === String(restoreState.caseId)) {
+        editDetails();
+      }
+    }
+    persistWorkspaceState();
   } catch (error) {
     if (request === authRequest) {
       const message = "Could not load your hospital workspace. " + (error.message || "Please refresh and try again.");
@@ -1549,6 +1606,7 @@ function editDetails() {
   Object.entries(EDIT_FIELDS).forEach(function([id, field]) { document.getElementById(id).value = field === "review_notes" ? "" : currentCase[field] || ""; });
   document.getElementById("reviewConfirmed").checked = false;
   document.getElementById("correctionForm").hidden = false;
+  persistWorkspaceState();
   document.getElementById("reviewActionStatus").textContent = "Your changes are not saved yet. Save Corrections or Cancel before opening another case.";
   updateControls();
   document.getElementById("editPatientName").focus();
@@ -1615,6 +1673,7 @@ async function saveCaseChange(payload, fromEditor) {
     savedCases = savedCases.map(function(row) { return row.id === data.id ? data : row; });
     renderCases();
     renderReview(currentCase);
+    persistWorkspaceState();
     await loadDashboardMetrics();
     message.textContent = fromEditor ? "Corrections saved. Check the saved details before approving. Status: " + data.status + "." : "Saved: " + data.status + ".";
   } catch (error) {
@@ -1630,17 +1689,26 @@ async function saveCaseChange(payload, fromEditor) {
 document.getElementById("approveBtn").addEventListener("click", function() { saveCaseStatus("Completed"); });
 document.getElementById("correctionBtn").addEventListener("click", function() { saveCaseStatus("Correction Required"); });
 document.getElementById("editDetailsBtn").addEventListener("click", editDetails);
-document.getElementById("cancelEditBtn").addEventListener("click", function() { closeEditor(); document.getElementById("reviewActionStatus").textContent = "Changes cancelled. Saved details were not changed."; updateControls(); });
+document.getElementById("cancelEditBtn").addEventListener("click", function() { closeEditor(); persistWorkspaceState(); document.getElementById("reviewActionStatus").textContent = "Changes cancelled. Saved details were not changed."; updateControls(); });
 document.getElementById("correctionForm").addEventListener("submit", saveCorrections);
 document.getElementById("reviewConfirmed").addEventListener("change", updateControls);
-window.addEventListener("beforeunload", function(event) { if (editing || saving) { event.preventDefault(); event.returnValue = ""; } });
-supabaseClient.auth.onAuthStateChange(function(event) {
+window.addEventListener("beforeunload", function(event) {
+  persistWorkspaceState();
+  if (editing || saving) { event.preventDefault(); event.returnValue = ""; }
+});
+window.addEventListener("pagehide", persistWorkspaceState);
+document.addEventListener("visibilitychange", function() {
+  if (document.visibilityState === "hidden") persistWorkspaceState();
+});
+supabaseClient.auth.onAuthStateChange(function(event, session) {
   if (event === "PASSWORD_RECOVERY") {
     recoveryFlowRequested = true;
     setPasswordPanelVisible(true, "recovery");
     return;
   }
   if (event === "SIGNED_IN") {
+    const incomingUserId = session?.user?.id || null;
+    if (incomingUserId && currentAuthUserId === incomingUserId && organizationId) return;
     setTimeout(updateAuthUI, 0);
     return;
   }
@@ -1661,7 +1729,9 @@ supabaseClient.auth.onAuthStateChange(function(event) {
     loadingActivity = false;
     loadingSettings = false;
     staffActionPending = false;
+    currentAuthUserId = null;
     activeView = "dashboard";
+    clearWorkspaceState();
     resetDashboardMetrics();
     clearReview();
     renderWorkspaceView();
