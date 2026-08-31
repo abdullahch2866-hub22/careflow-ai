@@ -199,7 +199,7 @@
     button:focus-visible { outline: 3px solid #2563eb; outline-offset: 3px; }
     .status[data-status="Review"] { background: #dbeafe; color: #1e40af; }
     .status[data-status="Correction Required"] { background: #fef3c7; color: #92400e; }
-    #caseListStatus:empty { display: none; }
+    #caseListStatus:empty, #dashboardMetricsStatus:empty { display: none; }
     [hidden] { display: none !important; }
     .review-form { padding: 24px 20px; background: #f8fafc; border-block: 1px solid #dbe3ee; }
     .review-form h3 { margin-bottom: 8px; }
@@ -286,25 +286,26 @@
 
         <div class="card">
           <div class="card-title">Documents Today</div>
-          <div class="card-number">24</div>
+          <div class="card-number" id="metricDocumentsToday" aria-live="polite">—</div>
         </div>
 
         <div class="card">
           <div class="card-title">Awaiting Review</div>
-          <div class="card-number">7</div>
+          <div class="card-number" id="metricAwaitingReview" aria-live="polite">—</div>
         </div>
 
         <div class="card">
           <div class="card-title">Completed</div>
-          <div class="card-number">17</div>
+          <div class="card-number" id="metricCompleted" aria-live="polite">—</div>
         </div>
 
-        <div class="card">
-          <div class="card-title">Time Saved</div>
-          <div class="card-number">6.4h</div>
+        <div class="card" title="Estimated at 15 minutes saved per completed case.">
+          <div class="card-title">Estimated Time Saved</div>
+          <div class="card-number" id="metricTimeSaved" aria-live="polite">—</div>
         </div>
 
       </section>
+      <p id="dashboardMetricsStatus" role="status" style="margin-top:-18px; margin-bottom:24px; color:#b91c1c;"></p>
 
       <section class="upload">
 
@@ -432,6 +433,7 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const CASE_COLUMNS = "id, document_id, organization_id, file_name, document_type, status, created_at, patient_name, document_date, insurance_information, missing_information, review_notes, review_revision, review_confirmed, updated_at, updated_by";
 const CASE_LIST_LIMIT = 50;
 const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
+const ESTIMATED_MINUTES_SAVED_PER_COMPLETED_CASE = 15;
 
 async function validatePdfUpload(file) {
   if (!/\.pdf$/i.test(file.name) ||
@@ -458,6 +460,7 @@ let loadingCases = false;
 let authRequest = 0;
 let listRequest = 0;
 let reviewRequest = 0;
+let dashboardRequest = 0;
 let editing = false;
 const EDIT_FIELDS = { editPatientName: "patient_name", editDocumentType: "document_type", editDocumentDate: "document_date", editInsurance: "insurance_information", editMissingInfo: "missing_information", editReviewNotes: "review_notes" };
 
@@ -472,6 +475,72 @@ function approvalProblem(row) {
 function setStatusBadge(element, status) {
   element.textContent = status || "Review";
   element.dataset.status = status || "Review";
+}
+
+function resetDashboardMetrics(message = "") {
+  document.getElementById("metricDocumentsToday").textContent = "—";
+  document.getElementById("metricAwaitingReview").textContent = "—";
+  document.getElementById("metricCompleted").textContent = "—";
+  document.getElementById("metricTimeSaved").textContent = "—";
+  document.getElementById("dashboardMetricsStatus").textContent = message;
+}
+
+function localDayBoundsIso() {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
+function formatEstimatedTimeSaved(completedCount) {
+  const minutes = completedCount * ESTIMATED_MINUTES_SAVED_PER_COMPLETED_CASE;
+  if (minutes < 60) return minutes + "m";
+  const hours = minutes / 60;
+  return (Number.isInteger(hours) ? hours.toFixed(0) : hours.toFixed(1)) + "h";
+}
+
+async function loadDashboardMetrics() {
+  if (!organizationId) {
+    resetDashboardMetrics();
+    return false;
+  }
+  const request = ++dashboardRequest;
+  const requestedOrganization = organizationId;
+  const bounds = localDayBoundsIso();
+  const status = document.getElementById("dashboardMetricsStatus");
+  status.textContent = "Updating dashboard totals...";
+  try {
+    const [todayResult, awaitingResult, completedResult] = await Promise.all([
+      supabaseClient.from("cases").select("id", { count: "exact", head: true })
+        .eq("organization_id", requestedOrganization)
+        .gte("created_at", bounds.start).lt("created_at", bounds.end),
+      supabaseClient.from("cases").select("id", { count: "exact", head: true })
+        .eq("organization_id", requestedOrganization)
+        .in("status", ["Review", "Correction Required"]),
+      supabaseClient.from("cases").select("id", { count: "exact", head: true })
+        .eq("organization_id", requestedOrganization)
+        .eq("status", "Completed")
+    ]);
+    if (request !== dashboardRequest || requestedOrganization !== organizationId) return false;
+    const failed = [todayResult, awaitingResult, completedResult].find(result => result.error);
+    if (failed) throw failed.error;
+    const documentsToday = todayResult.count ?? 0;
+    const awaitingReview = awaitingResult.count ?? 0;
+    const completed = completedResult.count ?? 0;
+    document.getElementById("metricDocumentsToday").textContent = String(documentsToday);
+    document.getElementById("metricAwaitingReview").textContent = String(awaitingReview);
+    document.getElementById("metricCompleted").textContent = String(completed);
+    document.getElementById("metricTimeSaved").textContent = formatEstimatedTimeSaved(completed);
+    status.textContent = "";
+    return true;
+  } catch (error) {
+    if (request === dashboardRequest && requestedOrganization === organizationId) {
+      resetDashboardMetrics("Could not load dashboard totals. Use Reload cases to retry.");
+      console.error("Dashboard metrics load failed:", error);
+    }
+    return false;
+  }
 }
 
 function updateControls() {
@@ -625,6 +694,8 @@ async function updateAuthUI() {
   savedCases = [];
   loadingCases = false;
   listRequest += 1;
+  dashboardRequest += 1;
+  resetDashboardMetrics();
   clearReview();
   renderCases();
   document.getElementById("caseListStatus").textContent = "";
@@ -645,7 +716,7 @@ async function updateAuthUI() {
     if (membershipError || !membership) throw membershipError || new Error("Hospital account not found.");
     organizationId = membership.organization_id;
     updateControls();
-    await loadCases();
+    await Promise.all([loadCases(), loadDashboardMetrics()]);
   } catch (error) {
     if (request === authRequest) {
       const message = "Could not load your hospital workspace. " + (error.message || "Please refresh and try again.");
@@ -677,7 +748,7 @@ document.getElementById("loginBtn").addEventListener("click", async function() {
 
 document.getElementById("reloadCasesBtn").addEventListener("click", async function() {
   clearReview();
-  await loadCases();
+  await Promise.all([loadCases(), loadDashboardMetrics()]);
 });
 
 document.getElementById("uploadBtn").addEventListener("click", function() {
@@ -744,7 +815,9 @@ document.getElementById("documentInput").addEventListener("change", async functi
     this.value = "";
     uploading = false;
     updateControls();
-    if (caseSaved && requestedAuth === authRequest && requestedOrganization === organizationId) await loadCases();
+    if (caseSaved && requestedAuth === authRequest && requestedOrganization === organizationId) {
+      await Promise.all([loadCases(), loadDashboardMetrics()]);
+    }
   }
 });
 
@@ -827,6 +900,7 @@ async function saveCaseChange(payload, fromEditor) {
     savedCases = savedCases.map(function(row) { return row.id === data.id ? data : row; });
     renderCases();
     renderReview(currentCase);
+    await loadDashboardMetrics();
     message.textContent = fromEditor ? "Corrections saved. Check the saved details before approving. Status: " + data.status + "." : "Saved: " + data.status + ".";
   } catch (error) {
     if (request === reviewRequest && requestedOrganization === organizationId) {
@@ -849,9 +923,11 @@ supabaseClient.auth.onAuthStateChange(function(event) {
   if (event === "SIGNED_OUT") {
     authRequest += 1;
     listRequest += 1;
+    dashboardRequest += 1;
     organizationId = null;
     savedCases = [];
     loadingCases = false;
+    resetDashboardMetrics();
     clearReview();
     renderCases();
     document.getElementById("uploadStatus").textContent = "";
