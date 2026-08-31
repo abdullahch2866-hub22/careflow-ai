@@ -1,0 +1,339 @@
+name: Apply workspace resume fix
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-workspace:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Preserve workspace location across tab changes and reloads
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('index.html')
+          text = path.read_text()
+
+          def replace_once(old, new):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'Expected exactly one match, found {count}: {old[:120]!r}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+          '''    <input type="password" id="newPassword" autocomplete="new-password" placeholder="New password" minlength="12" required style="padding:10px; margin-right:10px; min-width:240px;">
+    <input type="password" id="confirmNewPassword" autocomplete="new-password" placeholder="Confirm new password" minlength="12" required style="padding:10px; margin-right:10px; min-width:240px;">''',
+          '''    <input type="password" id="newPassword" autocomplete="new-password" placeholder="New password" minlength="15" required style="padding:10px; margin-right:10px; min-width:240px;">
+    <input type="password" id="confirmNewPassword" autocomplete="new-password" placeholder="Confirm new password" minlength="15" required style="padding:10px; margin-right:10px; min-width:240px;">''')
+
+          replace_once(
+          '''let activeView = "dashboard";
+let editing = false;
+const EDIT_FIELDS = {''',
+          '''let activeView = "dashboard";
+let editing = false;
+let currentAuthUserId = null;
+const WORKSPACE_STATE_KEY = "careflow.workspace.v1";
+
+function readWorkspaceState(userId) {
+  try {
+    const raw = sessionStorage.getItem(WORKSPACE_STATE_KEY);
+    if (!raw) return null;
+    const state = JSON.parse(raw);
+    if (!state || state.userId !== userId || !VIEW_CONFIG[state.view]) return null;
+    return {
+      view: state.view,
+      caseId: state.caseId ?? null,
+      editorOpen: state.editorOpen === true
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function persistWorkspaceState() {
+  if (!currentAuthUserId) return;
+  try {
+    sessionStorage.setItem(WORKSPACE_STATE_KEY, JSON.stringify({
+      userId: currentAuthUserId,
+      view: VIEW_CONFIG[activeView] ? activeView : "dashboard",
+      caseId: currentCase?.id ?? null,
+      editorOpen: editing === true
+    }));
+  } catch (_) { /* Workspace resume is best-effort only. */ }
+}
+
+function clearWorkspaceState() {
+  try { sessionStorage.removeItem(WORKSPACE_STATE_KEY); } catch (_) { /* Ignore storage errors. */ }
+}
+
+const EDIT_FIELDS = {''')
+
+          replace_once(
+          '''  activeView = view;
+  clearReview();
+  renderWorkspaceView();
+  if (view === "activity") await loadActivityLog();''',
+          '''  activeView = view;
+  clearReview();
+  renderWorkspaceView();
+  persistWorkspaceState();
+  if (view === "activity") await loadActivityLog();''')
+
+          replace_once(
+          '''    renderReview(data);
+    message.textContent = !data.document_id ?''',
+          '''    renderReview(data);
+    persistWorkspaceState();
+    message.textContent = !data.document_id ?''')
+
+          replace_once(
+          '''  document.getElementById("correctionForm").hidden = false;
+  document.getElementById("reviewActionStatus").textContent = "Your changes are not saved yet. Save Corrections or Cancel before opening another case.";''',
+          '''  document.getElementById("correctionForm").hidden = false;
+  persistWorkspaceState();
+  document.getElementById("reviewActionStatus").textContent = "Your changes are not saved yet. Save Corrections or Cancel before opening another case.";''')
+
+          replace_once(
+          '''    renderCases();
+    renderReview(currentCase);
+    await loadDashboardMetrics();''',
+          '''    renderCases();
+    renderReview(currentCase);
+    persistWorkspaceState();
+    await loadDashboardMetrics();''')
+
+          replace_once(
+          '''document.getElementById("cancelEditBtn").addEventListener("click", function() { closeEditor(); document.getElementById("reviewActionStatus").textContent = "Changes cancelled. Saved details were not changed."; updateControls(); });''',
+          '''document.getElementById("cancelEditBtn").addEventListener("click", function() { closeEditor(); persistWorkspaceState(); document.getElementById("reviewActionStatus").textContent = "Changes cancelled. Saved details were not changed."; updateControls(); });''')
+
+          replace_once(
+          '''window.addEventListener("beforeunload", function(event) { if (editing || saving) { event.preventDefault(); event.returnValue = ""; } });
+supabaseClient.auth.onAuthStateChange(function(event) {
+  if (event === "PASSWORD_RECOVERY") {
+    recoveryFlowRequested = true;
+    setPasswordPanelVisible(true, "recovery");
+    return;
+  }
+  if (event === "SIGNED_IN") {
+    setTimeout(updateAuthUI, 0);
+    return;
+  }''',
+          '''window.addEventListener("beforeunload", function(event) {
+  persistWorkspaceState();
+  if (editing || saving) { event.preventDefault(); event.returnValue = ""; }
+});
+window.addEventListener("pagehide", persistWorkspaceState);
+document.addEventListener("visibilitychange", function() {
+  if (document.visibilityState === "hidden") persistWorkspaceState();
+});
+supabaseClient.auth.onAuthStateChange(function(event, session) {
+  if (event === "PASSWORD_RECOVERY") {
+    recoveryFlowRequested = true;
+    setPasswordPanelVisible(true, "recovery");
+    return;
+  }
+  if (event === "SIGNED_IN") {
+    const incomingUserId = session?.user?.id || null;
+    if (incomingUserId && currentAuthUserId === incomingUserId && organizationId) return;
+    setTimeout(updateAuthUI, 0);
+    return;
+  }''')
+
+          replace_once(
+          '''    staffActionPending = false;
+    activeView = "dashboard";
+    resetDashboardMetrics();''',
+          '''    staffActionPending = false;
+    currentAuthUserId = null;
+    activeView = "dashboard";
+    clearWorkspaceState();
+    resetDashboardMetrics();''')
+
+          old_update = '''async function updateAuthUI() {
+  const request = ++authRequest;
+  organizationId = null;
+  savedCases = [];
+  loadingCases = false;
+  listRequest += 1;
+  dashboardRequest += 1;
+  activityRequest += 1;
+  settingsRequest += 1;
+  activityLogEntries = [];
+  organizationSettings = null;
+  organizationMembers = [];
+  loadingActivity = false;
+  loadingSettings = false;
+  staffActionPending = false;
+  activeView = "dashboard";
+  resetDashboardMetrics();
+  clearReview();
+  renderWorkspaceView();
+  document.getElementById("caseListStatus").textContent = "";
+  document.querySelector(".header").style.display = "none";
+  document.querySelector(".layout").style.display = "none";
+  document.getElementById("loginPanel").style.display = "block";
+  try {
+    const { data: { user }, error } = await supabaseClient.auth.getUser();
+    if (request !== authRequest) return;
+    if (!user) {
+      setPasswordPanelVisible(false);
+      return;
+    }
+    if (error) throw error;
+    document.getElementById("currentUserEmail").textContent = user.email || "Signed in";
+    const invitedNeedsPassword = !!user.user_metadata?.careflow_invited_organization && user.user_metadata?.careflow_password_set !== true;
+    if (recoveryFlowRequested || invitedNeedsPassword) {
+      setPasswordPanelVisible(true, recoveryFlowRequested ? "recovery" : "invite");
+      return;
+    }
+    setPasswordPanelVisible(false);
+    document.getElementById("loginPanel").style.display = "none";
+    document.querySelector(".header").style.display = "flex";
+    document.querySelector(".layout").style.display = "flex";
+    const { data: membership, error: membershipError } = await supabaseClient
+      .from("organization_members").select("organization_id").eq("user_id", user.id).single();
+    if (request !== authRequest) return;
+    if (membershipError || !membership) throw membershipError || new Error("Hospital account not found.");
+    organizationId = membership.organization_id;
+    renderWorkspaceView();
+    updateControls();
+    await Promise.all([loadCases(), loadDashboardMetrics()]);
+  } catch (error) {
+    if (request === authRequest) {
+      const message = "Could not load your hospital workspace. " + (error.message || "Please refresh and try again.");
+      document.getElementById("caseListStatus").textContent = message;
+      document.getElementById("loginStatus").textContent = message;
+    }
+  }
+}'''
+
+          new_update = '''async function updateAuthUI() {
+  const request = ++authRequest;
+  organizationId = null;
+  savedCases = [];
+  loadingCases = false;
+  listRequest += 1;
+  dashboardRequest += 1;
+  activityRequest += 1;
+  settingsRequest += 1;
+  activityLogEntries = [];
+  organizationSettings = null;
+  organizationMembers = [];
+  loadingActivity = false;
+  loadingSettings = false;
+  staffActionPending = false;
+  resetDashboardMetrics();
+  clearReview();
+  document.getElementById("caseListStatus").textContent = "";
+  document.querySelector(".header").style.display = "none";
+  document.querySelector(".layout").style.display = "none";
+  document.getElementById("loginPanel").style.display = "block";
+  try {
+    const { data: { user }, error } = await supabaseClient.auth.getUser();
+    if (request !== authRequest) return;
+    if (!user) {
+      currentAuthUserId = null;
+      activeView = "dashboard";
+      clearWorkspaceState();
+      renderWorkspaceView();
+      setPasswordPanelVisible(false);
+      return;
+    }
+    if (error) throw error;
+    currentAuthUserId = user.id;
+    const restoreState = readWorkspaceState(user.id);
+    activeView = restoreState?.view || "dashboard";
+    renderWorkspaceView();
+    document.getElementById("currentUserEmail").textContent = user.email || "Signed in";
+    const invitedNeedsPassword = !!user.user_metadata?.careflow_invited_organization && user.user_metadata?.careflow_password_set !== true;
+    if (recoveryFlowRequested || invitedNeedsPassword) {
+      setPasswordPanelVisible(true, recoveryFlowRequested ? "recovery" : "invite");
+      return;
+    }
+    setPasswordPanelVisible(false);
+    document.getElementById("loginPanel").style.display = "none";
+    document.querySelector(".header").style.display = "flex";
+    document.querySelector(".layout").style.display = "flex";
+    const { data: membership, error: membershipError } = await supabaseClient
+      .from("organization_members").select("organization_id").eq("user_id", user.id).single();
+    if (request !== authRequest) return;
+    if (membershipError || !membership) throw membershipError || new Error("Hospital account not found.");
+    organizationId = membership.organization_id;
+    renderWorkspaceView();
+    updateControls();
+    await Promise.all([loadCases(), loadDashboardMetrics()]);
+    if (request !== authRequest || !organizationId) return;
+    if (activeView === "activity") await loadActivityLog();
+    if (activeView === "organization") await loadOrganizationSettings();
+    if (activeView === "users") {
+      await loadOrganizationSettings();
+      await loadOrganizationMembers();
+    }
+    if (restoreState?.caseId && !["activity", "organization", "users"].includes(activeView)) {
+      await openCase(restoreState.caseId);
+      if (restoreState.editorOpen && currentCase && String(currentCase.id) === String(restoreState.caseId)) {
+        editDetails();
+      }
+    }
+    persistWorkspaceState();
+  } catch (error) {
+    if (request === authRequest) {
+      const message = "Could not load your hospital workspace. " + (error.message || "Please refresh and try again.");
+      document.getElementById("caseListStatus").textContent = message;
+      document.getElementById("loginStatus").textContent = message;
+    }
+  }
+}'''
+          replace_once(old_update, new_update)
+
+          replace_once(
+          '''  document.getElementById("passwordStatus").textContent = "Use at least 12 characters and do not reuse a password from another account.";''',
+          '''  document.getElementById("passwordStatus").textContent = "Use at least 15 characters with uppercase, lowercase, a number, and a symbol. Do not reuse a password from another account.";''')
+
+          replace_once(
+          '''  if (password.length < 12) {
+    status.textContent = "Use at least 12 characters.";
+    return;
+  }''',
+          '''  if (password.length < 15 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/[0-9]/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+    status.textContent = "Use at least 15 characters with uppercase, lowercase, a number, and a symbol.";
+    return;
+  }''')
+
+          path.write_text(text)
+          PY
+
+      - name: Install test dependencies
+        run: npm ci
+
+      - name: Run test suite
+        run: npm test
+
+      - name: Commit workspace resume fix
+        shell: bash
+        run: |
+          if git diff --quiet -- index.html; then
+            echo "No workspace changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Preserve workspace state across tab changes"
+          git push
