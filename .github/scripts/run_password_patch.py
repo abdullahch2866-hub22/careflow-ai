@@ -30,4 +30,8 @@ WORKSPACE_NAV_IDS.forEach(function(id) {
   if (button) button.addEventListener(\"click\", function() { switchWorkspaceView(NAV_VIEW_BY_ID[id]); });
 });''')"""
 source = source[:start] + replacement + source[end:]
+source = source.replace(
+    'let recoveryFlowRequested = window.location.hash.includes("type=recovery") || new URLSearchParams(window.location.search).get("type") === "recovery";',
+    'const careflowLocation = (typeof window !== "undefined" && window.location) ? window.location : { hash: "", search: "" };\nlet recoveryFlowRequested = (careflowLocation.hash || "").includes("type=recovery") || new URLSearchParams(careflowLocation.search || "").get("type") === "recovery";'
+)
 exec(compile(source, str(script_path), 'exec'), {})
