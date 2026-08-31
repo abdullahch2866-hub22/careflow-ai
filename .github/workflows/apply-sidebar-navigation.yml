@@ -23,7 +23,9 @@ jobs:
           cache: npm
 
       - name: Apply sidebar patch
-        run: node tools/apply-sidebar-navigation.mjs
+        run: |
+          node tools/apply-sidebar-navigation.mjs
+          node tools/fix-sidebar-navigation-test.mjs
 
       - name: Install test dependencies
         run: npm ci
