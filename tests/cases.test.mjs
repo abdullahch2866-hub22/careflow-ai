@@ -6,6 +6,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
+const syntheticPdf = '%PDF-1.7\n% Fictional test fixture only\n%%EOF\n';
+const pdfFile = (name = 'Example_Upload.pdf', type = 'application/pdf') => new File([syntheticPdf], name, { type });
+
 const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);
 const mock = fs.readFileSync(new URL('./mock-supabase.js', import.meta.url), 'utf8');
@@ -70,7 +73,7 @@ async function flush() { for (let i = 0; i < 12; i++) await new Promise(resolve 
 async function page(store = new Map(), search = '') {
   const document = makeDocument();
   const context = vm.createContext({
-    window: { addEventListener() {} }, document, location: { search }, URLSearchParams, structuredClone,
+    window: { addEventListener() {} }, document, location: { search }, URLSearchParams, structuredClone, crypto,
     sessionStorage: { getItem: key => store.get(key), setItem: (key, value) => store.set(key, value) },
     console,
     fetch() { throw new Error('Network forbidden in this test'); }
@@ -209,7 +212,7 @@ test('sign-out clears patient fields and cases; signed-out startup reads no case
 test('new upload keeps earlier cases and opens persisted AI details', async () => {
   const p = await page();
   const input = p.element('documentInput');
-  input.files = [{ name: 'Example_Upload.pdf', type: 'application/pdf' }];
+  input.files = [pdfFile()];
   input.value = 'Example_Upload.pdf';
   await input.dispatchEvent({ type: 'change' });
   await flush();
@@ -219,6 +222,93 @@ test('new upload keeps earlier cases and opens persisted AI details', async () =
   assert.equal(input.value, '');
   await p.review(9);
   assert.equal(p.text('reviewPatientName'), 'Uploaded Sample Patient');
+});
+
+test('invalid file types, empty PDFs, renamed files, and truncated PDFs cause no upload or data writes', async () => {
+  for (const file of [
+    new File(['image'], 'picture.png', {type:'image/png'}),
+    new File([syntheticPdf], 'picture.pdf', {type:'image/png'}),
+    new File([], 'empty.pdf', {type:'application/pdf'}),
+    new File(['not a PDF\n%%EOF'], 'renamed.pdf', {type:'application/pdf'}),
+    new File(['%PDF-1.7\ntruncated'], 'truncated.pdf', {type:'application/pdf'})
+  ]) {
+    const p = await page();
+    await p.review(8);
+    const original = p.saved();
+    const input = p.element('documentInput');
+    input.files = [file];
+    await input.dispatchEvent({type:'change'});
+    assert.match(p.text('uploadStatus'), /PDF|empty/);
+    assert.equal(p.queries().some(q=>/^(storage upload|insert|invoke)/.test(q)), false);
+    assert.deepEqual(p.saved(), original);
+    assert.equal(p.text('reviewPatientName'), 'Sample Patient A');
+    assert.equal(p.element('uploadBtn').disabled, false);
+    assert.equal(input.value, '');
+  }
+});
+
+test('oversized files are rejected before reading any bytes', async () => {
+  const p = await page();
+  p.element('documentInput').files = [{
+    name:'TooLarge.pdf', type:'application/pdf', size:10*1024*1024+1,
+    slice() { throw new Error('Oversized file must not be read'); }
+  }];
+  await p.element('documentInput').dispatchEvent({type:'change'});
+  assert.match(p.text('uploadStatus'), /too large/);
+  assert.equal(p.queries().some(q=>/^(storage upload|insert|invoke)/.test(q)), false);
+});
+
+test('the size boundary and PDF 2.0 header are accepted by the browser checks', async () => {
+  const p = await page();
+  const file = new File(['%PDF-2.0\n', new Uint8Array(10*1024*1024-15), '%%EOF\n'], 'Boundary.PDF', {type:'application/pdf'});
+  assert.equal(file.size, 10*1024*1024);
+  p.element('documentInput').files = [file];
+  await p.element('documentInput').dispatchEvent({type:'change'});
+  assert.match(p.text('uploadStatus'), /Uploaded and processed successfully/);
+});
+
+test('unknown MIME types are normalized after checking the PDF bytes and storage paths hide original filenames', async () => {
+  for (const type of ['', 'application/octet-stream']) {
+    const p = await page();
+    p.element('documentInput').files = [pdfFile('Fictional Patient 中文.PDF', type)];
+    await p.element('documentInput').dispatchEvent({type:'change'});
+    const upload = p.queries().find(q=>q.startsWith('storage upload '));
+    assert.ok(upload);
+    const [path, options] = JSON.parse(upload.slice('storage upload '.length));
+    assert.match(path, /^fixture-hospital-a\/[0-9a-f-]{36}\.pdf$/);
+    assert.equal(path.includes('Patient'), false);
+    assert.deepEqual(options, {contentType:'application/pdf',upsert:false});
+  }
+});
+
+test('sign-out while file checking is pending prevents uploading or creating records', async () => {
+  const p = await page();
+  const file = pdfFile();
+  let release;
+  p.element('documentInput').files = [{
+    name:file.name, type:file.type, size:file.size,
+    slice(start,end) { return start === 0 && end === 8
+      ? {text:()=>new Promise(resolve=>{release=resolve;})}
+      : file.slice(start,end); }
+  }];
+  const pending = p.element('documentInput').dispatchEvent({type:'change'});
+  p.run('fixtureSignedOut = true; fixtureAuthCallback("SIGNED_OUT")');
+  release('%PDF-1.7');
+  await pending; await flush();
+  assert.equal(p.queries().some(q=>/^(storage upload|insert|invoke)/.test(q)), false);
+  assert.equal(p.element('uploadBtn').disabled, true);
+});
+
+test('file selection cannot discard an open correction draft', async () => {
+  const p = await page();
+  await p.review(8);
+  await p.click('editDetailsBtn');
+  p.element('editPatientName').value = 'Unsaved fictional correction';
+  p.element('documentInput').files = [pdfFile()];
+  await p.element('documentInput').dispatchEvent({type:'change'});
+  assert.equal(p.element('correctionForm').hidden, false);
+  assert.equal(p.element('editPatientName').value, 'Unsaved fictional correction');
+  assert.equal(p.queries().some(q=>q.startsWith('storage upload')), false);
 });
 
 test('a rapid second decision is blocked while the first save is pending', async () => {

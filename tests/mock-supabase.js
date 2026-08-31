@@ -74,7 +74,7 @@ window.supabase = { createClient() { return {
     onAuthStateChange(callback) { fixtureAuthCallback = callback; return { data: { subscription: { unsubscribe() {} } } }; }
   },
   from: fixtureQuery,
-  storage: { from() { return { async upload() { recordFixtureQuery("storage upload"); return { data: {}, error: null }; } }; } },
+  storage: { from() { return { async upload(path, file, options) { recordFixtureQuery("storage upload " + JSON.stringify([path,options])); return { data: {}, error: null }; } }; } },
   functions: { async invoke() {
     recordFixtureQuery("invoke process-document");
     const extracted = { patient_name: "Uploaded Sample Patient", document_date: "2026-08-31", insurance_information: "Uploaded sample insurer", missing_information: "Sample missing contact" };
@@ -97,7 +97,7 @@ document.addEventListener("DOMContentLoaded", function() {
     "Expire session": () => { fixtureSignedOut = true; fixtureAuthCallback("SIGNED_OUT"); },
     "Simulate PDF selection": () => {
       const transfer = new DataTransfer();
-      transfer.items.add(new File(["Synthetic fixture"], "Example_Upload.pdf", { type: "application/pdf" }));
+      transfer.items.add(new File(["%PDF-1.7\n% Fictional fixture\n%%EOF\n"], "Example_Upload.pdf", { type: "application/pdf" }));
       const input = document.getElementById("documentInput");
       input.files = transfer.files;
       input.dispatchEvent(new Event("change", { bubbles: true }));
