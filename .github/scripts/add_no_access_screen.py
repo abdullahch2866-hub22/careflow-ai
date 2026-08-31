@@ -25,7 +25,7 @@ if start_replacement not in text:
     text = text.replace(start_anchor, start_replacement, 1)
 
 membership_old = '''    const { data: membership, error: membershipError } = await supabaseClient\n      .from("organization_members").select("organization_id").eq("user_id", user.id).single();\n    if (request !== authRequest) return;\n    if (membershipError || !membership) throw membershipError || new Error("Hospital account not found.");\n    organizationId = membership.organization_id;'''
-membership_new = '''    const { data: membership, error: membershipError } = await supabaseClient\n      .from("organization_members").select("organization_id").eq("user_id", user.id).maybeSingle();\n    if (request !== authRequest) return;\n    if (membershipError) throw membershipError;\n    if (!membership) {\n      setNoAccessVisible(true, user.email || "");\n      return;\n    }\n    organizationId = membership.organization_id;'''
+membership_new = '''    const { data: membership, error: membershipError } = await supabaseClient\n      .from("organization_members").select("organization_id").eq("user_id", user.id).single();\n    if (request !== authRequest) return;\n    const noMembership = membershipError?.code === "PGRST116" || /0 rows|no rows|multiple \(or no\) rows/i.test(membershipError?.details || membershipError?.message || "");\n    if (membershipError && !noMembership) throw membershipError;\n    if (!membership || noMembership) {\n      setNoAccessVisible(true, user.email || "");\n      return;\n    }\n    organizationId = membership.organization_id;'''
 if membership_new not in text:
     if membership_old not in text:
         raise SystemExit("Membership block not found")
