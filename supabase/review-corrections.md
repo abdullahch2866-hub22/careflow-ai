@@ -26,13 +26,18 @@ Previously saved extraction is not sent for AI processing again.
 
 ## Release order
 
-Publication is pending the owner's explicit approval to change the live
-database and website. A preflight live-transaction test was blocked before
-execution by the safety review. No live migration, case update, or Edge Function
-deployment was performed while preparing this release. The local browser
-preview was inaccessible to the cloud browser; the live form check remains
-pending after publication. Automated tests include real PostgreSQL enforcement
-in an isolated synthetic database, but are not a substitute for that live check.
+The owner explicitly approved the live database and website update on
+2026-08-31. Supabase migration `20260831022650_case_review_corrections` and
+processor version 3 were deployed. All 45 automated tests passed. A live
+rollback-only transaction verified missing-information rejection, correction,
+separate approval, actor recording, protected history, and non-member denial.
+Before/after checksums confirmed all existing case details and document rows
+were unchanged, and the test history rows were rolled back.
+
+The local preview was inaccessible to the cloud browser. The final signed-in
+form check on fake data remains necessary after the frontend is published.
+These checks do not certify the complete production permission setup or
+healthcare compliance.
 
 1. Run `npm ci --ignore-scripts` and `npm test` with Node 24 or later.
 2. Apply `review-corrections.sql` as one named Supabase migration. The schema
