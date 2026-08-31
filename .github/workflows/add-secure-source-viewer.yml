@@ -1,0 +1,31 @@
+name: Add secure source viewer
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply secure source viewer patch
+        run: python .github/scripts/add_secure_source_viewer.py
+      - name: Run tests
+        run: npm ci && npm test
+      - name: Commit CareFlow update
+        run: |
+          if git diff --quiet -- index.html tests/mock-supabase.js tests/cases.test.mjs; then
+            echo "No CareFlow changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html tests/mock-supabase.js tests/cases.test.mjs
+          git commit -m "Add secure source PDF viewer"
+          git push
