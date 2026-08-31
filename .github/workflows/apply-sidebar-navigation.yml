@@ -26,6 +26,7 @@ jobs:
         run: |
           node tools/apply-sidebar-navigation.mjs
           node tools/fix-sidebar-navigation-test.mjs
+          node tools/sidebar-test-compat.mjs
 
       - name: Install test dependencies
         run: npm ci
