@@ -5,6 +5,8 @@ interface ReqPayload {
   document_id: string;
 }
 
+const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
+
 function bytesToBase64(bytes: Uint8Array) {
   let binary = "";
   const chunkSize = 0x8000;
@@ -103,6 +105,23 @@ export default {
         );
       }
 
+      if (typeof documentRow.file_name !== "string" || !/\.pdf$/i.test(documentRow.file_name)) {
+        return Response.json({ error: "Only PDF documents can be processed." }, { status: 415 });
+      }
+
+      // Inspect actual Storage metadata with the same user's RLS before downloading.
+      const { data: fileInfo, error: infoError } = await ctx.supabase.storage
+        .from("documents").info(documentRow.storage_path);
+      if (infoError || !fileInfo) {
+        return Response.json({ error: "Document file not found or access denied" }, { status: 404 });
+      }
+      if (!Number.isSafeInteger(fileInfo.size) || fileInfo.size <= 0) {
+        return Response.json({ error: "The stored PDF is empty or has invalid size information." }, { status: 415 });
+      }
+      if (fileInfo.size > MAX_DOCUMENT_BYTES) {
+        return Response.json({ error: "PDF files must be no larger than 10 MB." }, { status: 413 });
+      }
+
       const { data: fileBlob, error: downloadError } =
         await ctx.supabase.storage
           .from("documents")
@@ -115,6 +134,16 @@ export default {
           },
           { status: 404 }
         );
+      }
+
+      // Recheck the downloaded bytes too; metadata and extension alone are not proof.
+      if (fileBlob.size > MAX_DOCUMENT_BYTES) {
+        return Response.json({ error: "PDF files must be no larger than 10 MB." }, { status: 413 });
+      }
+      const header = await fileBlob.slice(0, 8).text();
+      const ending = await fileBlob.slice(Math.max(0, fileBlob.size - 1024)).text();
+      if (!fileBlob.size || !/^%PDF-[12]\.\d$/.test(header) || !/%%EOF[\x00\t\n\f\r ]*$/.test(ending)) {
+        return Response.json({ error: "The stored file does not look like a complete PDF." }, { status: 415 });
       }
 
       const bytes = new Uint8Array(await fileBlob.arrayBuffer());

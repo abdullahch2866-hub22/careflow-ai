@@ -58,3 +58,14 @@ The frontend tests additionally cover correction persistence, required notes
 and confirmation, partial corrections, failed/stale saves, cancellation, and
 clearing drafts on sign-out. Use the browser fixture to inspect the form and
 compare visible saved values after a refresh. All fixture data is fictional.
+
+## PDF upload protection
+
+The full suite contains 58 tests. Browser tests now use File/Blob objects and
+cover type/size checks, obvious renamed and truncated PDFs, the exact 10 MB
+boundary, MIME normalization, opaque storage paths, sign-out during validation,
+and preserving open correction drafts. Processor tests cover Storage info
+denial, invalid/oversized metadata, the downloaded size, and header/EOF checks
+before AI calls. The PDF envelopes in these tests are synthetic, not a full
+PDF parser test corpus. See `supabase/upload-protection.md` for scope and the
+separate Storage configuration requirement.

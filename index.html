@@ -314,11 +314,12 @@
           CareFlow AI will extract administrative information
           and prepare it for human review.
         </p>
- <input type="file" id="documentInput" hidden>
+ <input type="file" id="documentInput" accept=".pdf,application/pdf" hidden>
 
 <button class="button" id="uploadBtn" type="button" disabled>
     Upload Document
 </button>
+<p style="margin-top:12px;color:#64748b;">PDF files only, up to 10 MB. Use fictional patient information while testing.</p>
 <p id="uploadStatus" style="margin-top:15px;color:#2563eb;"></p>
 
 
@@ -430,6 +431,24 @@ const SUPABASE_KEY = "sb_publishable_ucOmAjy6eXWdy-OPr9qCrQ_HkceYeN8";
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const CASE_COLUMNS = "id, document_id, organization_id, file_name, document_type, status, created_at, patient_name, document_date, insurance_information, missing_information, review_notes, review_revision, review_confirmed, updated_at, updated_by";
 const CASE_LIST_LIMIT = 50;
+const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
+
+async function validatePdfUpload(file) {
+  if (!/\.pdf$/i.test(file.name) ||
+      !["", "application/pdf", "application/octet-stream"].includes((file.type || "").toLowerCase())) {
+    throw new Error("Choose a PDF file. Other file types are not supported.");
+  }
+  if (!Number.isSafeInteger(file.size) || file.size <= 0) {
+    throw new Error("This file is empty or unreadable. Choose a complete PDF.");
+  }
+  if (file.size > MAX_DOCUMENT_BYTES) throw new Error("This PDF is too large. Choose a file no larger than 10 MB.");
+  // These checks catch obvious renamed/truncated files, not malware or every PDF error.
+  const header = await file.slice(0, 8).text();
+  const ending = await file.slice(Math.max(0, file.size - 1024)).text();
+  if (!/^%PDF-[12]\.\d$/.test(header) || !/%%EOF[\x00\t\n\f\r ]*$/.test(ending)) {
+    throw new Error("This file does not look like a complete PDF. Export it as a PDF and try again.");
+  }
+}
 let organizationId = null;
 let currentCase = null;
 let savedCases = [];
@@ -667,17 +686,24 @@ document.getElementById("uploadBtn").addEventListener("click", function() {
 
 document.getElementById("documentInput").addEventListener("change", async function() {
   const file = this.files[0];
-  if (!file || uploading || saving || loadingCases || !organizationId) return;
+  if (!file || uploading || saving || loadingCases || editing || !organizationId) return;
   const uploadStatus = document.getElementById("uploadStatus");
   const requestedOrganization = organizationId;
   const requestedAuth = authRequest;
   let caseSaved = false;
   uploading = true;
-  clearReview();
+  updateControls();
   try {
+    uploadStatus.textContent = "Checking PDF...";
+    await validatePdfUpload(file);
+    if (requestedAuth !== authRequest || requestedOrganization !== organizationId) return;
+    clearReview();
     uploadStatus.textContent = "Uploading: " + file.name + "...";
-    const filePath = requestedOrganization + "/" + Date.now() + "-" + file.name;
-    const { error: storageError } = await supabaseClient.storage.from("documents").upload(filePath, file);
+    // Keep patient names and arbitrary filename characters out of Storage paths.
+    const filePath = requestedOrganization + "/" + crypto.randomUUID() + ".pdf";
+    const { error: storageError } = await supabaseClient.storage.from("documents").upload(filePath, file, {
+      contentType: "application/pdf", upsert: false
+    });
     if (storageError) throw new Error("File upload failed: " + storageError.message);
     const { data: documentRow, error: documentError } = await supabaseClient.from("documents").insert([{
       file_name: file.name, document_type: "Healthcare document", status: "Review",

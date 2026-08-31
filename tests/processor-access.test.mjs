@@ -12,14 +12,16 @@ const executable = stripTypeScriptTypes(source.replace(/^import .*;\s*$/gm, ''),
 const organization = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa';
 const otherOrganization = 'bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb';
 const documentId = 'cccccccc-cccc-4ccc-cccc-cccccccccccc';
+const syntheticPdf = '%PDF-1.7\n% Fictional test fixture only\n%%EOF\n';
 
 function fixture(options = {}) {
-  const calls = { provider: 0, downloads: [], queries: [], writes: [] };
+  const calls = { provider: 0, infos: [], downloads: [], queries: [], writes: [] };
+  const file = options.file || new Blob([syntheticPdf], {type:'application/pdf'});
   const caseRow = { id: 8, organization_id: organization, document_id: documentId, review_revision: 0, status: 'Review', ...options.caseFields };
   const documentRow = {
     id: documentId, organization_id: organization,
     storage_path: options.path ?? organization + '/123-Synthetic.pdf',
-    file_name: 'Synthetic.pdf'
+    file_name: options.fileName ?? 'Synthetic.pdf'
   };
   const from = table => {
     let filters = [], payload = null;
@@ -48,10 +50,16 @@ function fixture(options = {}) {
   };
   const scoped = { from, storage: { from(bucket) {
     assert.equal(bucket, 'documents');
-    return { async download(path) {
+    return {
+      async info(path) {
+        calls.infos.push(path);
+        if (options.infoDenied) return {data:null,error:{message:'Access denied'}};
+        return {data:{size:Object.hasOwn(options,'infoSize') ? options.infoSize : file.size},error:null};
+      },
+      async download(path) {
       calls.downloads.push(path);
       if (options.storageDenied) return { data: null, error: { message: 'Storage access denied' } };
-      return { data: new Blob(['%PDF synthetic test only']), error: null };
+      return { data: file, error: null };
     } };
   } } };
   const ctx = {
@@ -173,4 +181,60 @@ test('a correction made during AI processing prevents overwriting or returning s
   assert.equal(response.status,500);
   assert.equal(response.body.extracted,undefined);
   assert.equal(f.calls.writes.length,0);
+});
+
+test('non-PDF document names are rejected before Storage reads or AI calls', async () => {
+  const f = fixture({fileName:'Renamed.png'});
+  assert.equal((await f.invoke()).status, 415);
+  assert.equal(f.calls.infos.length,0);
+  assert.equal(f.calls.downloads.length,0);
+  assert.equal(f.calls.provider,0);
+});
+
+test('Storage metadata denial prevents downloads and AI calls', async () => {
+  const f = fixture({infoDenied:true});
+  assert.equal((await f.invoke()).status,404);
+  assert.equal(f.calls.downloads.length,0);
+  assert.equal(f.calls.provider,0);
+});
+
+test('oversized stored files are rejected before downloading', async () => {
+  const f = fixture({infoSize:10*1024*1024+1});
+  assert.equal((await f.invoke()).status,413);
+  assert.equal(f.calls.downloads.length,0);
+  assert.equal(f.calls.provider,0);
+  assert.equal(f.calls.writes.length,0);
+});
+
+test('missing, invalid, or zero size metadata fails closed before download', async () => {
+  for (const infoSize of [undefined,null,0,-1,'100',NaN,Infinity,1.5]) {
+    const f = fixture({infoSize});
+    assert.equal((await f.invoke()).status,415);
+    assert.equal(f.calls.downloads.length,0);
+    assert.equal(f.calls.provider,0);
+  }
+});
+
+test('a downloaded file larger than its metadata limit is rejected without reading its bytes', async () => {
+  const f = fixture({infoSize:100,file:{size:10*1024*1024+1, slice(){throw new Error('Must not read oversized bytes');}}});
+  assert.equal((await f.invoke()).status,413);
+  assert.equal(f.calls.provider,0);
+  assert.equal(f.calls.writes.length,0);
+});
+
+test('renamed, empty, and truncated files never reach the AI provider', async () => {
+  for (const data of ['', 'PNG DATA\n%%EOF', '%PDF-1.7\ntruncated']) {
+    const f = fixture({infoSize:100,file:new Blob([data])});
+    assert.equal((await f.invoke()).status,415);
+    assert.equal(f.calls.provider,0);
+    assert.equal(f.calls.writes.length,0);
+  }
+});
+
+test('a valid PDF envelope at exactly 10 MB reaches the provider', async () => {
+  const file = new Blob(['%PDF-2.0\n',new Uint8Array(10*1024*1024-15),'%%EOF\n']);
+  const f = fixture({file,fileName:'Boundary.PDF'});
+  assert.equal(file.size,10*1024*1024);
+  assert.equal((await f.invoke()).status,200);
+  assert.equal(f.calls.provider,1);
 });
