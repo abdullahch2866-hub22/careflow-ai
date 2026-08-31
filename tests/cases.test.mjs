@@ -1,0 +1,218 @@
+// Run with Node 22+: node --test tests/cases.test.mjs
+// Executes the real inline app against a small DOM adapter and synthetic SDK.
+// No browser, network, patient data, or live database writes are used.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+
+const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);
+const mock = fs.readFileSync(new URL('./mock-supabase.js', import.meta.url), 'utf8');
+
+class Element {
+  constructor(tagName = 'div') {
+    this.tagName = tagName.toUpperCase();
+    this.children = [];
+    this.style = {};
+    this.dataset = {};
+    this.attributes = {};
+    this.listeners = {};
+    this.className = '';
+    this.disabled = false;
+    this.hidden = false;
+    this.value = '';
+    this.files = [];
+    this.text = '';
+  }
+  set textContent(value) { this.text = String(value); this.children = []; }
+  get textContent() { return this.text + this.children.map(child => child.textContent).join(''); }
+  set innerHTML(_) { throw new Error('Untrusted strings must not be inserted as HTML'); }
+  append(...children) { this.children.push(...children); }
+  replaceChildren(...children) { this.children = children; this.text = ''; }
+  setAttribute(key, value) { this.attributes[key] = value; }
+  addEventListener(event, callback) { (this.listeners[event] ||= []).push(callback); }
+  async dispatchEvent(event) { await Promise.all((this.listeners[event.type] || []).map(callback => callback.call(this, event))); }
+  async click() { if (!this.disabled) await this.dispatchEvent({ type: 'click' }); }
+}
+
+function makeDocument() {
+  const nodes = new Map();
+  for (const match of html.matchAll(/<([a-z]+)\b[^>]*\bid="([^"]+)"[^>]*>/g)) {
+    const element = new Element(match[1]);
+    element.disabled = /\sdisabled(?:\s|>)/.test(match[0]);
+    nodes.set(match[2], element);
+  }
+  for (const id of ['approveBtn', 'correctionBtn']) {
+    const expression = new RegExp('<button[^>]*id="'+id+'"[^>]*>([\\s\\S]*?)<\\/button>');
+    nodes.get(id).textContent = html.match(expression)[1].trim();
+  }
+  const header = new Element('header'), layout = new Element();
+  const body = new Element('body');
+  body.append(...nodes.values(), header, layout);
+  const all = element => [element, ...element.children.flatMap(all)];
+  return {
+    body,
+    getElementById: id => nodes.get(id) || null,
+    createElement: tag => new Element(tag),
+    querySelector: selector => ({ '.header': header, '.layout': layout })[selector] || null,
+    querySelectorAll: selector => {
+      assert.equal(selector, '.review-btn');
+      return all(body).filter(element => element.className.split(' ').includes('review-btn'));
+    },
+    addEventListener() { /* Fixture controls are not needed for these non-browser tests. */ }
+  };
+}
+
+async function flush() { for (let i = 0; i < 12; i++) await new Promise(resolve => setImmediate(resolve)); }
+async function page(store = new Map(), search = '') {
+  const document = makeDocument();
+  const context = vm.createContext({
+    window: {}, document, location: { search }, URLSearchParams, structuredClone,
+    sessionStorage: { getItem: key => store.get(key), setItem: (key, value) => store.set(key, value) },
+    console,
+    fetch() { throw new Error('Network forbidden in this test'); }
+  });
+  vm.runInContext(mock, context);
+  scripts.forEach(script => vm.runInContext(script, context));
+  await flush();
+  return {
+    store, document,
+    element: id => document.getElementById(id),
+    text: id => document.getElementById(id).textContent,
+    run: code => vm.runInContext(code, context),
+    async click(id) { await document.getElementById(id).click(); await flush(); },
+    async review(id) {
+      const button = document.querySelectorAll('.review-btn').find(button => button.attributes['aria-label'].startsWith('Review case '+id+':'));
+      assert.ok(button, 'Review button exists for case '+id);
+      await button.click(); await flush();
+    },
+    saved: () => JSON.parse(store.get('careflow-fixture-cases') || '[]'),
+    queries: () => JSON.parse(vm.runInContext('JSON.stringify(fixtureLog)', context))
+  };
+}
+
+test('loads real cases scoped to the hospital and renders filenames as plain text', async () => {
+  const p = await page();
+  assert.match(p.text('uploadedCase'), /Example_A.pdf/);
+  assert.match(p.text('uploadedCase'), /<img src=x onerror=alert\(1\)>.pdf/);
+  assert.doesNotMatch(p.text('uploadedCase'), /OTHER_HOSPITAL_PRIVATE|Referral Document|Insurance Document|Patient Intake Form/);
+  assert.equal(p.document.querySelectorAll('.review-btn').length, 2);
+  assert.ok(p.queries().some(query => query.includes('select cases [["organization_id","fixture-hospital-a"]]')));
+});
+
+test('opens the selected case with its saved fields and current status', async () => {
+  const p = await page();
+  await p.review(8);
+  assert.equal(p.text('reviewPatientName'), 'Sample Patient A');
+  assert.equal(p.text('reviewStatusText'), 'Correction Required');
+  assert.equal(p.element('correctionBtn').disabled, true);
+  await p.review(7);
+  assert.equal(p.text('reviewPatientName'), 'Sample Patient B');
+  assert.equal(p.text('reviewDocumentDate'), 'Not found');
+  assert.equal(p.text('reviewStatusText'), 'Review');
+  assert.equal(p.element('missingInfoBadge').hidden, true);
+});
+
+test('saves both decisions to the selected case and keeps stable action labels', async () => {
+  const p = await page();
+  await p.review(8);
+  await p.click('approveBtn');
+  assert.equal(p.text('reviewStatusText'), 'Completed');
+  assert.equal(p.text('approveBtn'), 'Approve Document');
+  assert.equal(p.text('correctionBtn'), 'Request Correction');
+  await p.click('correctionBtn');
+  assert.equal(p.text('reviewStatusText'), 'Correction Required');
+  assert.equal(p.saved().find(row => row.id === 8).status, 'Correction Required');
+  assert.equal(p.saved().find(row => row.id === 7).status, 'Review');
+  assert.ok(p.queries().filter(query => query.startsWith('update cases')).every(query => query.includes('["id",8]') && query.includes('["document_id","fixture-document-8"]') && query.includes('["organization_id","fixture-hospital-a"]')));
+});
+
+test('a fresh page reload restores saved cases, details, and status without uploading', async () => {
+  const first = await page();
+  await first.review(7);
+  await first.click('approveBtn');
+  const reloaded = await page(first.store);
+  assert.match(reloaded.text('uploadedCase'), /Completed/);
+  await reloaded.review(7);
+  assert.equal(reloaded.text('reviewPatientName'), 'Sample Patient B');
+  assert.equal(reloaded.text('reviewStatusText'), 'Completed');
+  assert.equal(reloaded.queries().some(query => query.startsWith('storage') || query.startsWith('invoke')), false);
+});
+
+test('failed saves keep the previous status and re-enable the controls', async () => {
+  const p = await page();
+  await p.review(7);
+  p.run('fixtureFailSave = true');
+  await p.click('approveBtn');
+  assert.equal(p.text('reviewStatusText'), 'Review');
+  assert.match(p.text('reviewActionStatus'), /Could not save.*save rejected/);
+  assert.equal(p.element('approveBtn').disabled, false);
+  await p.click('approveBtn');
+  assert.equal(p.text('reviewStatusText'), 'Completed');
+});
+
+test('zero-row updates cannot report a successful save', async () => {
+  const p = await page();
+  await p.review(7);
+  p.run('fixtureEmpty = true');
+  await p.click('approveBtn');
+  assert.equal(p.text('reviewStatusText'), 'Review');
+  assert.match(p.text('reviewActionStatus'), /Could not save/);
+});
+
+test('list errors clear stale rows, report failure, and allow a retry', async () => {
+  const p = await page();
+  p.run('fixtureFailList = true');
+  await p.click('reloadCasesBtn');
+  assert.equal(p.document.querySelectorAll('.review-btn').length, 0);
+  assert.match(p.text('caseListStatus'), /Could not load saved cases/);
+  await p.click('reloadCasesBtn');
+  assert.equal(p.document.querySelectorAll('.review-btn').length, 2);
+  assert.equal(p.text('caseListStatus'), '');
+});
+
+test('an empty hospital shows an honest empty state', async () => {
+  const p = await page();
+  p.run('fixtureEmpty = true');
+  await p.click('reloadCasesBtn');
+  assert.equal(p.text('uploadedCase'), '');
+  assert.match(p.text('caseListStatus'), /No saved cases yet/);
+});
+
+test('sign-out clears patient fields and cases; signed-out startup reads no cases', async () => {
+  const p = await page();
+  await p.review(8);
+  p.run('fixtureAuthCallback("SIGNED_OUT")');
+  assert.equal(p.text('uploadedCase'), '');
+  assert.equal(p.text('reviewPatientName'), '');
+  assert.equal(p.element('approveBtn').disabled, true);
+  const signedOut = await page(new Map(), '?signed-out');
+  assert.equal(signedOut.queries().length, 0);
+  assert.equal(signedOut.element('uploadBtn').disabled, true);
+});
+
+test('new upload keeps earlier cases and opens persisted AI details', async () => {
+  const p = await page();
+  const input = p.element('documentInput');
+  input.files = [{ name: 'Example_Upload.pdf', type: 'application/pdf' }];
+  input.value = 'Example_Upload.pdf';
+  await input.dispatchEvent({ type: 'change' });
+  await flush();
+  assert.match(p.text('uploadStatus'), /Uploaded and processed successfully/);
+  assert.equal(p.document.querySelectorAll('.review-btn').length, 3);
+  assert.match(p.text('uploadedCase'), /Example_A.pdf/);
+  assert.equal(input.value, '');
+  await p.review(9);
+  assert.equal(p.text('reviewPatientName'), 'Uploaded Sample Patient');
+});
+
+test('a rapid second decision is blocked while the first save is pending', async () => {
+  const p = await page();
+  await p.review(7);
+  const pending = p.element('approveBtn').click();
+  await p.element('correctionBtn').click();
+  await pending; await flush();
+  assert.equal(p.queries().filter(query => query.startsWith('update cases')).length, 1);
+  assert.equal(p.text('reviewStatusText'), 'Completed');
+});

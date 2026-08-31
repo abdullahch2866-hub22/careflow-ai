@@ -184,7 +184,27 @@
       color: #166534;
     }
 
-        @media (max-width: 900px) {
+    .case-list-header, .case-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .case { gap: 18px; }
+    .case > div:first-child { min-width: 0; overflow-wrap: anywhere; }
+    .case-actions { flex-shrink: 0; }
+    .review-btn { padding: 8px 14px; }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    button:focus-visible { outline: 3px solid #2563eb; outline-offset: 3px; }
+    .status[data-status="Review"] { background: #dbeafe; color: #1e40af; }
+    .status[data-status="Correction Required"] { background: #fef3c7; color: #92400e; }
+    #caseListStatus:empty { display: none; }
+    @media (max-width: 600px) {
+      .case { align-items: flex-start; flex-direction: column; }
+    }
+
+    @media (max-width: 900px) {
       .cards {
         grid-template-columns: repeat(2, 1fr);
       }
@@ -277,192 +297,28 @@
         </p>
  <input type="file" id="documentInput" hidden>
 
-<button class="button" onclick="document.getElementById('documentInput').click()">
+<button class="button" id="uploadBtn" type="button" disabled>
     Upload Document
 </button>
 <p id="uploadStatus" style="margin-top:15px;color:#2563eb;"></p>
 
-<script>
-  let currentDocumentId = null;
- document.getElementById("documentInput").addEventListener("change", async function() {
-    if (this.files.length > 0) {
 
-        const file = this.files[0];
-      const { data: membership, error: membershipError } = await supabaseClient
-    .from("organization_members")
-    .select("organization_id")
-    .single();
-
-if (membershipError || !membership) {
-    document.getElementById("uploadStatus").textContent =
-        "Upload failed: hospital account not found.";
-    return;
-}
-
-const organizationId = membership.organization_id;
-
-        document.getElementById("uploadStatus").textContent =
-    "Uploading: " + file.name + "...";
-
-const filePath = organizationId + "/" + Date.now() + "-" + file.name;
-
-const { data: storageData, error: storageError } = await supabaseClient.storage
-    .from("documents")
-    .upload(filePath, file);
-
-if (storageError) {
-    document.getElementById("uploadStatus").textContent =
-        "File upload failed: " + storageError.message;
-    return;
-}
-      const { data, error } = await supabaseClient
-    .from("documents")
-    .insert([
-        {
-            file_name: file.name,
-document_type: "Healthcare document",
-status: "Review",
- organization_id: organizationId,
-storage_path: filePath
-        }
-    ])
-.select("id")
-.single();
-
- if (error) {
-    document.getElementById("uploadStatus").textContent =
-        "Database save failed: " + error.message;
-    return;
-}
-      const { error: caseError } = await supabaseClient
-  .from("cases")
-  .insert([
-    {
-      file_name: file.name,
-      document_type: "Healthcare document",
-      status: "Review",
-      organization_id: organizationId,
-      document_id: data.id
-    }
-  ]);
-
-if (caseError) {
-  document.getElementById("uploadStatus").textContent =
-    "Case save failed: " + caseError.message;
-  return;
-}
-      currentDocumentId = data.id;
-      document.getElementById("uploadStatus").textContent =
-  "Uploaded successfully. AI is processing the document...";
-
-const { data: aiResult, error: aiError } =
-  await supabaseClient.functions.invoke("process-document", {
-    body: {
-      document_id: data.id
-    }
-  });
-
- if (aiError) {
-  let aiErrorDetails = aiError.message;
-
-  try {
-    if (aiError.context) {
-      const errorBody = await aiError.context.clone().json();
-
-      aiErrorDetails +=
-        " | " +
-        (errorBody.details ||
-         errorBody.error ||
-         JSON.stringify(errorBody));
-    }
-  } catch (readError) {
-    console.error("Could not read AI error response:", readError);
-  }
-
-  document.getElementById("uploadStatus").textContent =
-    "AI processing failed: " + aiErrorDetails;
-
-  console.error("CareFlow AI error:", aiError);
-  return;
-}
-
-document.getElementById("uploadStatus").textContent =
-  "Uploaded and processed successfully: " + file.name + " ✓";
-
-console.log("CareFlow AI extraction:", aiResult);
-      const extracted = aiResult?.extracted || {};
-
-document.getElementById("reviewPatientName").textContent =
-  extracted.patient_name || "Not found";
-
-document.getElementById("reviewDocumentType").textContent =
-  "Healthcare document";
-
-document.getElementById("reviewDocumentDate").textContent =
-  extracted.document_date || "Not found";
-
-document.getElementById("reviewInsurance").textContent =
-  extracted.insurance_information || "Not found";
-
-document.getElementById("reviewMissingInfo").textContent =
-  extracted.missing_information || "None identified";
-
-      const caseArea = document.getElementById("uploadedCase");
-caseArea.innerHTML =
-    '<div class="case">' +
-    '<div>' +
-    '<div class="case-name">' + this.files[0].name + '</div>' +
-    '<div class="case-type">Healthcare document</div>' +
-    '</div>' +
-     '<button class="status review-btn" type="button">Review</button>' +
-    '</div>';
-       caseArea.querySelector(".review-btn").addEventListener("click", function() {
-    document.getElementById("reviewPanel").style.display = "block";
-    this.textContent = "In Review";
-});
-    }
-});
-</script>
       </section>
 
       <section class="recent">
 
-        <div class="recent-header">
-          Recent Cases
+        <div class="recent-header case-list-header">
+          <span>Recent Cases</span>
+          <button type="button" id="reloadCasesBtn" class="button" disabled>Reload cases</button>
         </div>
-<div id="uploadedCase"></div>
-        <div class="case">
-          <div>
-            <div class="case-name">Referral Document</div>
-            <div class="case-type">Administrative document</div>
-          </div>
-
-          <div class="status">Completed</div>
-        </div>
-
-        <div class="case">
-          <div>
-            <div class="case-name">Insurance Document</div>
-            <div class="case-type">Insurance information</div>
-          </div>
-
-          <div class="status">Completed</div>
-        </div>
-
-        <div class="case">
-          <div>
-            <div class="case-name">Patient Intake Form</div>
-            <div class="case-type">Patient administration</div>
-          </div>
-
-          <div class="status">Review</div>
-        </div>
-
+        <p id="caseListStatus" role="status" style="padding:12px 20px;"></p>
+        <div id="uploadedCase"></div>
       </section>
 <section id="reviewPanel" class="recent" style="display:none; margin-top:30px;">
 
     <div class="recent-header">
         Patient Document Review
+        <div id="reviewFileName" class="case-type" style="margin-top:8px;"></div>
     </div>
 
    <div class="case">
@@ -498,26 +354,27 @@ caseArea.innerHTML =
     <div class="case-name">Missing Information</div>
     <div class="case-type" id="reviewMissingInfo">—</div>
   </div>
-  <div class="status">Needs Review</div>
+  <div id="missingInfoBadge" class="status" data-status="Correction Required">Missing information</div>
 </div>
 
     <div class="case">
         <div>
             <div class="case-name">Review Status</div>
-            <div class="case-type">Pending human review</div>
+            <div id="reviewStatusText" class="case-type">Pending human review</div>
         </div>
-        <div class="status">Review</div>
+        <div id="reviewStatusBadge" class="status" data-status="Review">Review</div>
     </div>
   <div style="display:flex; gap:12px; padding:20px; flex-wrap:wrap;">
-    <button type="button" id="approveBtn" style="padding:12px 20px; border:0; border-radius:8px; background:#16a34a; color:white; cursor:pointer;">
+    <button type="button" id="approveBtn" disabled style="padding:12px 20px; border:0; border-radius:8px; background:#16a34a; color:white; cursor:pointer;">
 Approve Document
 </button>
 
-<button type="button" id="correctionBtn" style="padding:12px 20px; border:0; border-radius:8px; background:#f59e0b; color:white; cursor:pointer;">
+<button type="button" id="correctionBtn" disabled style="padding:12px 20px; border:0; border-radius:8px; background:#f59e0b; color:white; cursor:pointer;">
 Request Correction
 </button>
     </div>
 
+  <p id="reviewActionStatus" role="status" style="padding:0 20px 20px;"></p>
 </section>
     </main>
 
@@ -525,124 +382,331 @@ Request Correction
   <script>
 const SUPABASE_URL = "https://qyrxexraolqyymyozrtl.supabase.co";
 const SUPABASE_KEY = "sb_publishable_ucOmAjy6eXWdy-OPr9qCrQ_HkceYeN8";
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const CASE_COLUMNS = "id, document_id, organization_id, file_name, document_type, status, created_at, patient_name, document_date, insurance_information, missing_information";
+const CASE_LIST_LIMIT = 50;
+let organizationId = null;
+let currentCase = null;
+let savedCases = [];
+let uploading = false;
+let saving = false;
+let loadingCases = false;
+let authRequest = 0;
+let listRequest = 0;
+let reviewRequest = 0;
 
-const supabaseClient = window.supabase.createClient(
-    SUPABASE_URL,
-    SUPABASE_KEY
-);
-    async function updateAuthUI() {
-    const { data: { user } } = await supabaseClient.auth.getUser();
-
-    if (user) {
-        document.getElementById("loginPanel").style.display = "none";
-        document.querySelector(".header").style.display = "flex";
-        document.querySelector(".layout").style.display = "flex";
-    } else {
-        document.getElementById("loginPanel").style.display = "block";
-        document.querySelector(".header").style.display = "none";
-        document.querySelector(".layout").style.display = "none";
-    }
+function setStatusBadge(element, status) {
+  element.textContent = status || "Review";
+  element.dataset.status = status || "Review";
 }
 
-updateAuthUI();
-    document.getElementById("loginBtn").addEventListener("click", async function() {
-
-    const email = document.getElementById("loginEmail").value.trim();
-    const password = document.getElementById("loginPassword").value;
-    const loginStatus = document.getElementById("loginStatus");
-
-    loginStatus.textContent = "Signing in...";
-
-    const { data, error } = await supabaseClient.auth.signInWithPassword({
-        email: email,
-        password: password
-    });
-
-    if (error) {
-        loginStatus.textContent = "Login failed: " + error.message;
-        return;
-    }
-
-    loginStatus.textContent = "Signed in successfully ✓";
-      await updateAuthUI();
-}); 
- 
- function updateReviewStatusUI(statusText) {
-  const cases = document.querySelectorAll("#reviewPanel .case");
-
-  cases.forEach(function(caseItem) {
-    const title = caseItem.querySelector(".case-name");
-
-    if (title && title.textContent.trim() === "Review Status") {
-      const status = caseItem.querySelector(".status");
-      const type = caseItem.querySelector(".case-type");
-
-      if (status) {
-        status.textContent = statusText;
-      }
-
-      if (type) {
-        type.textContent = statusText;
-      }
-    }
+function updateControls() {
+  const busy = uploading || saving || loadingCases;
+  document.getElementById("uploadBtn").disabled = busy || !organizationId;
+  document.getElementById("reloadCasesBtn").disabled = busy || !organizationId;
+  document.querySelectorAll(".review-btn").forEach(function(button) {
+    button.disabled = busy;
   });
+  document.getElementById("approveBtn").disabled = busy || !currentCase?.document_id || currentCase.status === "Completed";
+  document.getElementById("correctionBtn").disabled = busy || !currentCase?.document_id || currentCase.status === "Correction Required";
+}
 
-  const recentStatus = document.querySelector("#uploadedCase .status");
+function clearReview() {
+  reviewRequest += 1;
+  currentCase = null;
+  document.getElementById("reviewPanel").style.display = "none";
+  document.getElementById("reviewActionStatus").textContent = "";
+  ["reviewFileName", "reviewPatientName", "reviewDocumentType", "reviewDocumentDate", "reviewInsurance", "reviewMissingInfo", "reviewStatusText", "reviewStatusBadge"].forEach(function(id) {
+    document.getElementById(id).textContent = "";
+  });
+  updateControls();
+}
 
-  if (recentStatus) {
-    recentStatus.textContent = statusText;
+function renderCases() {
+  const container = document.getElementById("uploadedCase");
+  container.replaceChildren();
+  savedCases.forEach(function(caseRow) {
+    const row = document.createElement("div");
+    row.className = "case";
+    const details = document.createElement("div");
+    const name = document.createElement("div");
+    name.className = "case-name";
+    // Filenames and extracted values are untrusted text, never HTML.
+    name.textContent = caseRow.file_name || "Untitled document";
+    const type = document.createElement("div");
+    type.className = "case-type";
+    type.textContent = (caseRow.document_type || "Healthcare document") + " · Case #" + caseRow.id;
+    details.append(name, type);
+    const actions = document.createElement("div");
+    actions.className = "case-actions";
+    const badge = document.createElement("span");
+    badge.className = "status";
+    setStatusBadge(badge, caseRow.status);
+    const review = document.createElement("button");
+    review.type = "button";
+    review.className = "button review-btn";
+    review.textContent = "Review";
+    review.setAttribute("aria-label", "Review case " + caseRow.id + ": " + (caseRow.file_name || "Untitled document"));
+    review.addEventListener("click", function() { openCase(caseRow.id); });
+    actions.append(badge, review);
+    row.append(details, actions);
+    container.append(row);
+  });
+  updateControls();
+}
+
+async function loadCases() {
+  if (!organizationId) return false;
+  const request = ++listRequest;
+  const requestedOrganization = organizationId;
+  const status = document.getElementById("caseListStatus");
+  status.textContent = "Loading saved cases...";
+  loadingCases = true;
+  updateControls();
+  try {
+    const { data, error } = await supabaseClient.from("cases")
+      .select(CASE_COLUMNS)
+      .eq("organization_id", requestedOrganization)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(CASE_LIST_LIMIT);
+    if (request !== listRequest || requestedOrganization !== organizationId) return false;
+    if (error) throw error;
+    savedCases = data || [];
+    renderCases();
+    status.textContent = savedCases.length === 0 ? "No saved cases yet. Upload a test document to begin." :
+      savedCases.length === CASE_LIST_LIMIT ? "Showing the 50 most recent saved cases." : "";
+    return true;
+  } catch (error) {
+    if (request === listRequest && requestedOrganization === organizationId) {
+      savedCases = [];
+      renderCases();
+      status.textContent = "Could not load saved cases. " + (error.message || "Check your connection.") + " Use Reload cases to retry.";
+    }
+    return false;
+  } finally {
+    if (request === listRequest && requestedOrganization === organizationId) {
+      loadingCases = false;
+      updateControls();
+    }
   }
 }
 
-async function saveCaseStatus(newStatus, button) {
-  if (!currentDocumentId) {
-    alert("Please upload a document before changing its status.");
-    return;
-  }
-
-  const originalText = button.textContent;
-
-  button.disabled = true;
-  button.textContent = "Saving...";
-
-  const { data: updatedCase, error } = await supabaseClient
-    .from("cases")
-    .update({
-      status: newStatus
-    })
-    .eq("document_id", currentDocumentId)
-    .select("id, status")
-    .single();
-
-  if (error) {
-    console.error("Case status update failed:", error);
-
-    alert("Could not update case status: " + error.message);
-
-    button.disabled = false;
-    button.textContent = originalText;
-    return;
-  }
-
-  updateReviewStatusUI(updatedCase.status);
-
-  button.textContent = updatedCase.status;
-  button.disabled = false;
+function renderReview(caseRow) {
+  currentCase = caseRow;
+  document.getElementById("reviewFileName").textContent = (caseRow.file_name || "Untitled document") + " · Case #" + caseRow.id;
+  document.getElementById("reviewPatientName").textContent = caseRow.patient_name || "Not found";
+  document.getElementById("reviewDocumentType").textContent = caseRow.document_type || "Healthcare document";
+  document.getElementById("reviewDocumentDate").textContent = caseRow.document_date || "Not found";
+  document.getElementById("reviewInsurance").textContent = caseRow.insurance_information || "Not found";
+  document.getElementById("reviewMissingInfo").textContent = caseRow.missing_information || "None recorded";
+  const missingBadge = document.getElementById("missingInfoBadge");
+  missingBadge.hidden = !caseRow.missing_information;
+  document.getElementById("reviewStatusText").textContent = caseRow.status || "Review";
+  setStatusBadge(document.getElementById("reviewStatusBadge"), caseRow.status);
+  document.getElementById("reviewPanel").style.display = "block";
+  updateControls();
 }
 
-document.getElementById("approveBtn").addEventListener(
-  "click",
-  async function() {
-    await saveCaseStatus("Completed", this);
+async function openCase(caseId) {
+  if (uploading || saving || loadingCases || !organizationId) return;
+  clearReview();
+  const request = reviewRequest;
+  const requestedOrganization = organizationId;
+  const message = document.getElementById("reviewActionStatus");
+  document.getElementById("reviewPanel").style.display = "block";
+  message.textContent = "Loading saved review details...";
+  try {
+    const { data, error } = await supabaseClient.from("cases")
+      .select(CASE_COLUMNS)
+      .eq("id", caseId)
+      .eq("organization_id", requestedOrganization)
+      .single();
+    if (request !== reviewRequest || requestedOrganization !== organizationId) return;
+    if (error || !data) throw error || new Error("Case not found or access denied.");
+    renderReview(data);
+    message.textContent = !data.document_id ? "This older case has no linked document. Review decisions are unavailable." :
+      !data.patient_name && !data.document_date && !data.insurance_information && !data.missing_information ?
+        "No extraction details are saved for this case. Check the source document before approving." : "";
+  } catch (error) {
+    if (request === reviewRequest && requestedOrganization === organizationId) {
+      message.textContent = "Could not open this case. " + (error.message || "Please try again.");
+    }
   }
-);
+}
 
-document.getElementById("correctionBtn").addEventListener(
-  "click",
-  async function() {
-    await saveCaseStatus("Correction Required", this);
+async function updateAuthUI() {
+  const request = ++authRequest;
+  organizationId = null;
+  savedCases = [];
+  loadingCases = false;
+  listRequest += 1;
+  clearReview();
+  renderCases();
+  document.getElementById("caseListStatus").textContent = "";
+  document.querySelector(".header").style.display = "none";
+  document.querySelector(".layout").style.display = "none";
+  document.getElementById("loginPanel").style.display = "block";
+  try {
+    const { data: { user }, error } = await supabaseClient.auth.getUser();
+    if (request !== authRequest) return;
+    if (!user) return;
+    if (error) throw error;
+    document.getElementById("loginPanel").style.display = "none";
+    document.querySelector(".header").style.display = "flex";
+    document.querySelector(".layout").style.display = "flex";
+    const { data: membership, error: membershipError } = await supabaseClient
+      .from("organization_members").select("organization_id").eq("user_id", user.id).single();
+    if (request !== authRequest) return;
+    if (membershipError || !membership) throw membershipError || new Error("Hospital account not found.");
+    organizationId = membership.organization_id;
+    updateControls();
+    await loadCases();
+  } catch (error) {
+    if (request === authRequest) {
+      const message = "Could not load your hospital workspace. " + (error.message || "Please refresh and try again.");
+      document.getElementById("caseListStatus").textContent = message;
+      document.getElementById("loginStatus").textContent = message;
+    }
   }
-);
+}
+
+document.getElementById("loginBtn").addEventListener("click", async function() {
+  const loginStatus = document.getElementById("loginStatus");
+  this.disabled = true;
+  loginStatus.textContent = "Signing in...";
+  try {
+    const { error } = await supabaseClient.auth.signInWithPassword({
+      email: document.getElementById("loginEmail").value.trim(),
+      password: document.getElementById("loginPassword").value
+    });
+    if (error) throw error;
+    document.getElementById("loginPassword").value = "";
+    loginStatus.textContent = "Signed in successfully ✓";
+    await updateAuthUI();
+  } catch (error) {
+    loginStatus.textContent = "Login failed: " + (error.message || "Please try again.");
+  } finally {
+    this.disabled = false;
+  }
+});
+
+document.getElementById("reloadCasesBtn").addEventListener("click", async function() {
+  clearReview();
+  await loadCases();
+});
+
+document.getElementById("uploadBtn").addEventListener("click", function() {
+  document.getElementById("documentInput").click();
+});
+
+document.getElementById("documentInput").addEventListener("change", async function() {
+  const file = this.files[0];
+  if (!file || uploading || saving || loadingCases || !organizationId) return;
+  const uploadStatus = document.getElementById("uploadStatus");
+  const requestedOrganization = organizationId;
+  const requestedAuth = authRequest;
+  let caseSaved = false;
+  uploading = true;
+  clearReview();
+  try {
+    uploadStatus.textContent = "Uploading: " + file.name + "...";
+    const filePath = requestedOrganization + "/" + Date.now() + "-" + file.name;
+    const { error: storageError } = await supabaseClient.storage.from("documents").upload(filePath, file);
+    if (storageError) throw new Error("File upload failed: " + storageError.message);
+    const { data: documentRow, error: documentError } = await supabaseClient.from("documents").insert([{
+      file_name: file.name, document_type: "Healthcare document", status: "Review",
+      organization_id: requestedOrganization, storage_path: filePath
+    }]).select("id").single();
+    if (documentError) throw new Error("Database save failed: " + documentError.message);
+    const { error: caseError } = await supabaseClient.from("cases").insert([{
+      file_name: file.name, document_type: "Healthcare document", status: "Review",
+      organization_id: requestedOrganization, document_id: documentRow.id
+    }]);
+    if (caseError) throw new Error("Case save failed: " + caseError.message);
+    caseSaved = true;
+    if (requestedAuth !== authRequest || requestedOrganization !== organizationId) return;
+    uploadStatus.textContent = "Uploaded successfully. AI is processing the document...";
+    const { data: aiResult, error: aiError } = await supabaseClient.functions.invoke("process-document", {
+      body: { document_id: documentRow.id }
+    });
+    if (aiError) {
+      let details = aiError.message;
+      try {
+        if (aiError.context) {
+          const body = await aiError.context.clone().json();
+          details += " | " + (body.details || body.error || "Processing error");
+        }
+      } catch (_) { /* Keep the original error if the body cannot be read. */ }
+      throw new Error("AI processing failed: " + details);
+    }
+    if (!aiResult || aiResult.success !== true) throw new Error("AI processing did not confirm success.");
+    if (requestedAuth === authRequest && requestedOrganization === organizationId) {
+      uploadStatus.textContent = "Uploaded and processed successfully: " + file.name + " ✓";
+    }
+  } catch (error) {
+    if (requestedAuth === authRequest && requestedOrganization === organizationId) {
+      uploadStatus.textContent = (error.message || "Upload failed. Please try again.") +
+        (caseSaved ? " Your case is saved; AI details may be incomplete." : "");
+    }
+  } finally {
+    this.value = "";
+    uploading = false;
+    updateControls();
+    if (caseSaved && requestedAuth === authRequest && requestedOrganization === organizationId) await loadCases();
+  }
+});
+
+async function saveCaseStatus(newStatus) {
+  if (saving || uploading || loadingCases || !currentCase?.document_id || !organizationId || currentCase.status === newStatus) return;
+  const selectedId = currentCase.id;
+  const selectedDocumentId = currentCase.document_id;
+  const requestedOrganization = organizationId;
+  const request = reviewRequest;
+  const message = document.getElementById("reviewActionStatus");
+  saving = true;
+  updateControls();
+  message.textContent = "Saving...";
+  try {
+    const { data, error } = await supabaseClient.from("cases").update({ status: newStatus })
+      .eq("id", selectedId).eq("document_id", selectedDocumentId)
+      .eq("organization_id", requestedOrganization).select("id, status").single();
+    if (error || !data) throw error || new Error("Case not found or access denied.");
+    if (request !== reviewRequest || requestedOrganization !== organizationId) return;
+    currentCase = { ...currentCase, status: data.status };
+    savedCases = savedCases.map(function(row) { return row.id === data.id ? { ...row, status: data.status } : row; });
+    renderCases();
+    renderReview(currentCase);
+    message.textContent = "Saved: " + data.status + ".";
+  } catch (error) {
+    if (request === reviewRequest && requestedOrganization === organizationId) {
+      message.textContent = "Could not save the decision. " + (error.message || "Please try again.");
+    }
+  } finally {
+    saving = false;
+    updateControls();
+  }
+}
+
+document.getElementById("approveBtn").addEventListener("click", function() { saveCaseStatus("Completed"); });
+document.getElementById("correctionBtn").addEventListener("click", function() { saveCaseStatus("Correction Required"); });
+supabaseClient.auth.onAuthStateChange(function(event) {
+  if (event === "SIGNED_OUT") {
+    authRequest += 1;
+    listRequest += 1;
+    organizationId = null;
+    savedCases = [];
+    loadingCases = false;
+    clearReview();
+    renderCases();
+    document.getElementById("uploadStatus").textContent = "";
+    document.getElementById("caseListStatus").textContent = "";
+    document.getElementById("loginPanel").style.display = "block";
+    document.querySelector(".header").style.display = "none";
+    document.querySelector(".layout").style.display = "none";
+  }
+});
+updateAuthUI();
 
 </script>
   
