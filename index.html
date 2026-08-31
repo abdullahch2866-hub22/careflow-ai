@@ -61,14 +61,30 @@
     }
 
     .nav-item {
+      display: block;
+      width: 100%;
       padding: 13px 15px;
       border-radius: 8px;
       margin-bottom: 7px;
       cursor: pointer;
+      border: 0;
+      background: transparent;
+      color: white;
+      text-align: left;
+      font: inherit;
+    }
+
+    button.nav-item:hover:not(:disabled) {
+      background: #1f2937;
     }
 
     .nav-item.active {
       background: #2563eb;
+    }
+
+    button.nav-item:disabled {
+      opacity: 0.6;
+      cursor: wait;
     }
 
     .main {
@@ -195,6 +211,11 @@
     .case > div:first-child { min-width: 0; overflow-wrap: anywhere; }
     .case-actions { flex-shrink: 0; }
     .review-btn { padding: 8px 14px; }
+    .empty-state { padding: 26px 20px; color: #64748b; }
+    .activity-entry { padding: 18px 20px; border-bottom: 1px solid #f1f5f9; }
+    .activity-entry:last-child { border-bottom: none; }
+    .activity-title { font-weight: bold; margin-bottom: 6px; }
+    .activity-meta { color: #64748b; font-size: 13px; line-height: 1.5; }
     button:disabled { opacity: 0.55; cursor: not-allowed; }
     button:focus-visible { outline: 3px solid #2563eb; outline-offset: 3px; }
     .status[data-status="Review"] { background: #dbeafe; color: #1e40af; }
@@ -262,11 +283,11 @@
     <aside class="sidebar">
       <h3>Workspace</h3>
 
-      <div class="nav-item active">Dashboard</div>
-      <div class="nav-item">Documents</div>
-      <div class="nav-item">Review Queue</div>
-      <div class="nav-item">Completed</div>
-      <div class="nav-item">Activity Log</div>
+      <button type="button" id="navDashboard" class="nav-item active" data-view="dashboard" aria-current="page">Dashboard</button>
+      <button type="button" id="navDocuments" class="nav-item" data-view="documents">Documents</button>
+      <button type="button" id="navReview" class="nav-item" data-view="review">Review Queue</button>
+      <button type="button" id="navCompleted" class="nav-item" data-view="completed">Completed</button>
+      <button type="button" id="navActivity" class="nav-item" data-view="activity">Activity Log</button>
 
       <br>
 
@@ -277,12 +298,12 @@
 
     <main class="main">
 
-      <section class="welcome">
-        <h1>Good evening</h1>
-        <p>Welcome to your CareFlow AI workspace.</p>
+      <section class="welcome" id="workspaceWelcome">
+        <h1 id="workspaceTitle">Good evening</h1>
+        <p id="workspaceSubtitle">Welcome to your CareFlow AI workspace.</p>
       </section>
 
-      <section class="cards">
+      <section class="cards" id="dashboardCards">
 
         <div class="card">
           <div class="card-title">Documents Today</div>
@@ -307,7 +328,7 @@
       </section>
       <p id="dashboardMetricsStatus" role="status" style="margin-top:-18px; margin-bottom:24px; color:#b91c1c;"></p>
 
-      <section class="upload">
+      <section class="upload" id="uploadSection">
 
         <h2>Upload a healthcare document</h2>
 
@@ -326,15 +347,25 @@
 
       </section>
 
-      <section class="recent">
+      <section class="recent" id="caseListSection">
 
         <div class="recent-header case-list-header">
-          <span>Recent Cases</span>
+          <span id="caseListTitle">Recent Cases</span>
           <button type="button" id="reloadCasesBtn" class="button" disabled>Reload cases</button>
         </div>
         <p id="caseListStatus" role="status" style="padding:12px 20px;"></p>
         <div id="uploadedCase"></div>
       </section>
+
+      <section id="activityLogSection" class="recent" hidden>
+        <div class="recent-header case-list-header">
+          <span>Activity Log</span>
+          <button type="button" id="reloadActivityBtn" class="button" disabled>Reload activity</button>
+        </div>
+        <p id="activityLogStatus" role="status" style="padding:12px 20px;"></p>
+        <div id="activityLogList"></div>
+      </section>
+
 <section id="reviewPanel" class="recent" style="display:none; margin-top:30px;">
 
     <div class="recent-header">
@@ -461,6 +492,10 @@ let authRequest = 0;
 let listRequest = 0;
 let reviewRequest = 0;
 let dashboardRequest = 0;
+let activityRequest = 0;
+let activityLogEntries = [];
+let loadingActivity = false;
+let activeView = "dashboard";
 let editing = false;
 const EDIT_FIELDS = { editPatientName: "patient_name", editDocumentType: "document_type", editDocumentDate: "document_date", editInsurance: "insurance_information", editMissingInfo: "missing_information", editReviewNotes: "review_notes" };
 
@@ -543,10 +578,200 @@ async function loadDashboardMetrics() {
   }
 }
 
+const WORKSPACE_NAV_IDS = ["navDashboard", "navDocuments", "navReview", "navCompleted", "navActivity"];
+const NAV_VIEW_BY_ID = {
+  navDashboard: "dashboard",
+  navDocuments: "documents",
+  navReview: "review",
+  navCompleted: "completed",
+  navActivity: "activity"
+};
+
+function setNavSelected(button, selected) {
+  if (!button) return;
+  const classes = button.className.split(/\s+/).filter(Boolean).filter(function(name) { return name !== "active"; });
+  if (selected) classes.push("active");
+  button.className = classes.join(" ");
+  button.setAttribute("aria-current", selected ? "page" : "false");
+}
+
+const VIEW_CONFIG = {
+  dashboard: {
+    title: "Good evening",
+    subtitle: "Welcome to your CareFlow AI workspace.",
+    listTitle: "Recent Cases"
+  },
+  documents: {
+    title: "Documents",
+    subtitle: "Browse the saved documents for this hospital.",
+    listTitle: "All Documents"
+  },
+  review: {
+    title: "Review Queue",
+    subtitle: "Cases that still need human review or correction.",
+    listTitle: "Cases Awaiting Review"
+  },
+  completed: {
+    title: "Completed",
+    subtitle: "Approved cases completed by this hospital.",
+    listTitle: "Completed Cases"
+  },
+  activity: {
+    title: "Activity Log",
+    subtitle: "Protected review activity for this hospital. Patient values are not shown here.",
+    listTitle: "Activity Log"
+  }
+};
+
+function casesForActiveView() {
+  if (activeView === "review") {
+    return savedCases.filter(function(row) { return ["Review", "Correction Required"].includes(row.status); });
+  }
+  if (activeView === "completed") {
+    return savedCases.filter(function(row) { return row.status === "Completed"; });
+  }
+  if (activeView === "dashboard") return savedCases.slice(0, 10);
+  return savedCases;
+}
+
+function emptyMessageForActiveView() {
+  if (activeView === "review") return "No cases are waiting for review.";
+  if (activeView === "completed") return "No completed cases yet.";
+  if (activeView === "documents") return "No saved documents yet.";
+  return "No recent cases yet. Upload a test document to begin.";
+}
+
+function renderWorkspaceView() {
+  const config = VIEW_CONFIG[activeView] || VIEW_CONFIG.dashboard;
+  const title = document.getElementById("workspaceTitle");
+  const subtitle = document.getElementById("workspaceSubtitle");
+  const listTitle = document.getElementById("caseListTitle");
+  if (title) title.textContent = config.title;
+  if (subtitle) subtitle.textContent = config.subtitle;
+  if (listTitle) listTitle.textContent = config.listTitle;
+
+  const isDashboard = activeView === "dashboard";
+  const isActivity = activeView === "activity";
+  const cards = document.getElementById("dashboardCards");
+  const metricsStatus = document.getElementById("dashboardMetricsStatus");
+  const uploadSection = document.getElementById("uploadSection");
+  const caseListSection = document.getElementById("caseListSection");
+  const activitySection = document.getElementById("activityLogSection");
+  if (cards) cards.hidden = !isDashboard;
+  if (metricsStatus) metricsStatus.hidden = !isDashboard;
+  if (uploadSection) uploadSection.hidden = !(activeView === "dashboard" || activeView === "documents");
+  if (caseListSection) caseListSection.hidden = isActivity;
+  if (activitySection) activitySection.hidden = !isActivity;
+
+  WORKSPACE_NAV_IDS.forEach(function(id) {
+    setNavSelected(document.getElementById(id), NAV_VIEW_BY_ID[id] === activeView);
+  });
+
+  if (!isActivity) renderCases();
+}
+
+async function switchWorkspaceView(view) {
+  if (!VIEW_CONFIG[view] || !organizationId) return;
+  if (editing) {
+    document.getElementById("reviewActionStatus").textContent = "Save Corrections or Cancel before leaving this case.";
+    return;
+  }
+  if (uploading || saving || loadingCases || loadingActivity) return;
+  activeView = view;
+  clearReview();
+  renderWorkspaceView();
+  if (view === "activity") await loadActivityLog();
+}
+
+function changedActivityFields(entry) {
+  const labels = {
+    status: "Status",
+    patient_name: "Patient name",
+    document_type: "Document type",
+    document_date: "Document date",
+    insurance_information: "Insurance information",
+    missing_information: "Missing information",
+    review_notes: "Correction note",
+    review_confirmed: "Review confirmation"
+  };
+  const before = entry.before_values || {};
+  const after = entry.after_values || {};
+  return Object.keys(labels).filter(function(key) {
+    return JSON.stringify(before[key]) !== JSON.stringify(after[key]);
+  }).map(function(key) { return labels[key]; });
+}
+
+function renderActivityLog() {
+  const container = document.getElementById("activityLogList");
+  container.replaceChildren();
+  if (activityLogEntries.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "No review activity has been recorded yet.";
+    container.append(empty);
+    return;
+  }
+  activityLogEntries.forEach(function(entry) {
+    const row = document.createElement("div");
+    row.className = "activity-entry";
+    const title = document.createElement("div");
+    title.className = "activity-title";
+    title.textContent = "Case #" + entry.case_id + (entry.operation === "INSERT" ? " created" : " updated");
+    const meta = document.createElement("div");
+    meta.className = "activity-meta";
+    const changed = changedActivityFields(entry);
+    const timestamp = entry.changed_at ? new Date(entry.changed_at).toLocaleString() : "Time unavailable";
+    meta.textContent = timestamp + (changed.length ? " · Changed: " + changed.join(", ") : " · Review record saved");
+    row.append(title, meta);
+    container.append(row);
+  });
+}
+
+async function loadActivityLog() {
+  if (!organizationId) return false;
+  const request = ++activityRequest;
+  const requestedOrganization = organizationId;
+  const status = document.getElementById("activityLogStatus");
+  status.textContent = "Loading protected activity...";
+  loadingActivity = true;
+  updateControls();
+  try {
+    const { data, error } = await supabaseClient.from("case_review_history")
+      .select("id, case_id, changed_at, operation, before_values, after_values")
+      .eq("organization_id", requestedOrganization)
+      .order("changed_at", { ascending: false })
+      .limit(50);
+    if (request !== activityRequest || requestedOrganization !== organizationId) return false;
+    if (error) throw error;
+    activityLogEntries = data || [];
+    renderActivityLog();
+    status.textContent = activityLogEntries.length === 50 ? "Showing the 50 most recent review events." : "";
+    return true;
+  } catch (error) {
+    if (request === activityRequest && requestedOrganization === organizationId) {
+      activityLogEntries = [];
+      renderActivityLog();
+      status.textContent = "Could not load activity. " + (error.message || "Please try again.");
+    }
+    return false;
+  } finally {
+    if (request === activityRequest && requestedOrganization === organizationId) {
+      loadingActivity = false;
+      updateControls();
+    }
+  }
+}
+
 function updateControls() {
-  const busy = uploading || saving || loadingCases;
+  const busy = uploading || saving || loadingCases || loadingActivity;
   document.getElementById("uploadBtn").disabled = busy || editing || !organizationId;
   document.getElementById("reloadCasesBtn").disabled = busy || editing || !organizationId;
+  const reloadActivityBtn = document.getElementById("reloadActivityBtn");
+  if (reloadActivityBtn) reloadActivityBtn.disabled = busy || editing || !organizationId;
+  WORKSPACE_NAV_IDS.forEach(function(id) {
+    const button = document.getElementById(id);
+    if (button) button.disabled = busy || editing || !organizationId;
+  });
   document.querySelectorAll(".review-btn").forEach(function(button) {
     button.disabled = busy || editing;
   });
@@ -576,7 +801,18 @@ function clearReview() {
 function renderCases() {
   const container = document.getElementById("uploadedCase");
   container.replaceChildren();
-  savedCases.forEach(function(caseRow) {
+  const visibleCases = casesForActiveView();
+  if (visibleCases.length === 0) {
+    if (activeView !== "dashboard") {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = emptyMessageForActiveView();
+      container.append(empty);
+    }
+    updateControls();
+    return;
+  }
+  visibleCases.forEach(function(caseRow) {
     const row = document.createElement("div");
     row.className = "case";
     const details = document.createElement("div");
@@ -624,7 +860,7 @@ async function loadCases() {
     if (request !== listRequest || requestedOrganization !== organizationId) return false;
     if (error) throw error;
     savedCases = data || [];
-    renderCases();
+    renderWorkspaceView();
     status.textContent = savedCases.length === 0 ? "No saved cases yet. Upload a test document to begin." :
       savedCases.length === CASE_LIST_LIMIT ? "Showing the 50 most recent saved cases." : "";
     return true;
@@ -695,9 +931,13 @@ async function updateAuthUI() {
   loadingCases = false;
   listRequest += 1;
   dashboardRequest += 1;
+  activityRequest += 1;
+  activityLogEntries = [];
+  loadingActivity = false;
+  activeView = "dashboard";
   resetDashboardMetrics();
   clearReview();
-  renderCases();
+  renderWorkspaceView();
   document.getElementById("caseListStatus").textContent = "";
   document.querySelector(".header").style.display = "none";
   document.querySelector(".layout").style.display = "none";
@@ -715,6 +955,7 @@ async function updateAuthUI() {
     if (request !== authRequest) return;
     if (membershipError || !membership) throw membershipError || new Error("Hospital account not found.");
     organizationId = membership.organization_id;
+    renderWorkspaceView();
     updateControls();
     await Promise.all([loadCases(), loadDashboardMetrics()]);
   } catch (error) {
@@ -746,10 +987,18 @@ document.getElementById("loginBtn").addEventListener("click", async function() {
   }
 });
 
+WORKSPACE_NAV_IDS.forEach(function(id) {
+  const button = document.getElementById(id);
+  if (button) button.addEventListener("click", function() { switchWorkspaceView(NAV_VIEW_BY_ID[id]); });
+});
+
 document.getElementById("reloadCasesBtn").addEventListener("click", async function() {
   clearReview();
   await Promise.all([loadCases(), loadDashboardMetrics()]);
 });
+
+const reloadActivityBtn = document.getElementById("reloadActivityBtn");
+if (reloadActivityBtn) reloadActivityBtn.addEventListener("click", loadActivityLog);
 
 document.getElementById("uploadBtn").addEventListener("click", function() {
   document.getElementById("documentInput").click();
@@ -924,12 +1173,16 @@ supabaseClient.auth.onAuthStateChange(function(event) {
     authRequest += 1;
     listRequest += 1;
     dashboardRequest += 1;
+    activityRequest += 1;
     organizationId = null;
     savedCases = [];
+    activityLogEntries = [];
     loadingCases = false;
+    loadingActivity = false;
+    activeView = "dashboard";
     resetDashboardMetrics();
     clearReview();
-    renderCases();
+    renderWorkspaceView();
     document.getElementById("uploadStatus").textContent = "";
     document.getElementById("caseListStatus").textContent = "";
     document.getElementById("loginPanel").style.display = "block";
