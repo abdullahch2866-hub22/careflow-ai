@@ -1,0 +1,118 @@
+from pathlib import Path
+
+path = Path("index.html")
+text = path.read_text()
+
+old = '''const WORKSPACE_STATE_KEY = "careflow.workspace.v1";
+
+function readWorkspaceState(userId) {
+  try {
+    const raw = sessionStorage.getItem(WORKSPACE_STATE_KEY);
+    if (!raw) return null;
+    const state = JSON.parse(raw);
+    if (!state || state.userId !== userId || !VIEW_CONFIG[state.view]) return null;
+    return {
+      view: state.view,
+      caseId: state.caseId ?? null,
+      editorOpen: state.editorOpen === true
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function persistWorkspaceState() {
+  if (!currentAuthUserId) return;
+  try {
+    sessionStorage.setItem(WORKSPACE_STATE_KEY, JSON.stringify({
+      userId: currentAuthUserId,
+      view: VIEW_CONFIG[activeView] ? activeView : "dashboard",
+      caseId: currentCase?.id ?? null,
+      editorOpen: editing === true
+    }));
+  } catch (_) { /* Workspace resume is best-effort only. */ }
+}
+
+function clearWorkspaceState() {
+  try { sessionStorage.removeItem(WORKSPACE_STATE_KEY); } catch (_) { /* Ignore storage errors. */ }
+}'''
+
+new = '''const WORKSPACE_STATE_KEY = "careflow.workspace.v2";
+const LEGACY_WORKSPACE_STATE_KEY = "careflow.workspace.v1";
+
+function readWorkspaceState(userId) {
+  try {
+    const raw = localStorage.getItem(WORKSPACE_STATE_KEY) || sessionStorage.getItem(LEGACY_WORKSPACE_STATE_KEY);
+    if (!raw) return null;
+    const state = JSON.parse(raw);
+    if (!state || state.userId !== userId || !VIEW_CONFIG[state.view]) return null;
+    return {
+      view: state.view,
+      caseId: state.caseId ?? null,
+      editorOpen: state.editorOpen === true,
+      scrollY: Number.isFinite(Number(state.scrollY)) ? Math.max(0, Number(state.scrollY)) : 0
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function persistWorkspaceState() {
+  if (!currentAuthUserId) return;
+  try {
+    localStorage.setItem(WORKSPACE_STATE_KEY, JSON.stringify({
+      userId: currentAuthUserId,
+      view: VIEW_CONFIG[activeView] ? activeView : "dashboard",
+      caseId: currentCase?.id ?? null,
+      editorOpen: editing === true,
+      scrollY: Math.max(0, Math.round(window.scrollY || 0))
+    }));
+    sessionStorage.removeItem(LEGACY_WORKSPACE_STATE_KEY);
+  } catch (_) { /* Workspace resume is best-effort only. */ }
+}
+
+function clearWorkspaceState() {
+  try {
+    localStorage.removeItem(WORKSPACE_STATE_KEY);
+    sessionStorage.removeItem(LEGACY_WORKSPACE_STATE_KEY);
+  } catch (_) { /* Ignore storage errors. */ }
+}'''
+
+if old in text:
+    text = text.replace(old, new, 1)
+
+old_restore = '''    if (restoreState?.caseId && !["activity", "organization", "users"].includes(activeView)) {
+      await openCase(restoreState.caseId);
+      if (restoreState.editorOpen && currentCase && String(currentCase.id) === String(restoreState.caseId)) {
+        editDetails();
+      }
+    }
+    persistWorkspaceState();'''
+new_restore = '''    if (restoreState?.caseId && !["activity", "organization", "users"].includes(activeView)) {
+      await openCase(restoreState.caseId);
+      if (restoreState.editorOpen && currentCase && String(currentCase.id) === String(restoreState.caseId)) {
+        editDetails();
+      }
+    }
+    if (restoreState?.scrollY) {
+      requestAnimationFrame(function() {
+        window.scrollTo({ top: restoreState.scrollY, left: 0, behavior: "auto" });
+      });
+    }
+    persistWorkspaceState();'''
+if old_restore in text:
+    text = text.replace(old_restore, new_restore, 1)
+
+old_events = '''window.addEventListener("pagehide", persistWorkspaceState);
+document.addEventListener("visibilitychange", function() {
+  if (document.visibilityState === "hidden") persistWorkspaceState();
+});'''
+new_events = '''window.addEventListener("pagehide", persistWorkspaceState);
+window.addEventListener("blur", persistWorkspaceState);
+document.addEventListener("visibilitychange", function() {
+  if (document.visibilityState === "hidden") persistWorkspaceState();
+});'''
+if old_events in text:
+    text = text.replace(old_events, new_events, 1)
+
+path.write_text(text)
