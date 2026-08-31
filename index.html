@@ -534,7 +534,8 @@
     <div class="case">
       <div><div class="case-name">Latest correction note</div><div id="reviewNotes" class="case-type">No corrections recorded.</div></div>
     </div>
-    <div style="padding:20px;">
+    <div style="padding:20px; display:flex; gap:12px; flex-wrap:wrap;">
+      <button type="button" id="viewSourceBtn" class="button secondary" disabled>View Source PDF</button>
       <button type="button" id="editDetailsBtn" class="button" disabled>Edit Details</button>
     </div>
     <form id="correctionForm" class="review-form" hidden autocomplete="off">
@@ -569,6 +570,20 @@ Request Correction
 
   <p id="reviewActionStatus" role="status" style="padding:0 20px 20px;"></p>
 </section>
+
+<div id="sourceViewerModal" hidden role="dialog" aria-modal="true" aria-labelledby="sourceViewerTitle" style="position:fixed; inset:0; z-index:1000; background:rgba(15,23,42,.72); padding:24px;">
+  <div style="background:white; width:min(1100px, 100%); height:min(90vh, 900px); margin:0 auto; border-radius:14px; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 24px 70px rgba(15,23,42,.35);">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 20px; border-bottom:1px solid #e5e7eb;">
+      <div>
+        <div id="sourceViewerTitle" style="font-size:20px; font-weight:700;">Secure Source PDF</div>
+        <div id="sourceViewerFileName" style="color:#64748b; margin-top:4px;"></div>
+      </div>
+      <button type="button" id="closeSourceViewerBtn" class="button secondary">Close</button>
+    </div>
+    <p id="sourceViewerStatus" role="status" style="padding:10px 20px; margin:0; color:#475569; border-bottom:1px solid #e5e7eb;">Creating a protected document view...</p>
+    <iframe id="sourcePdfFrame" title="Secure source PDF viewer" referrerpolicy="no-referrer" style="border:0; width:100%; flex:1; background:#f8fafc;" src="about:blank"></iframe>
+  </div>
+</div>
     </main>
 
   </div>
@@ -621,6 +636,8 @@ let settingsRequest = 0;
 let staffActionPending = false;
 let activeView = "dashboard";
 let editing = false;
+let sourceViewerLoading = false;
+let sourceViewerRequest = 0;
 let currentAuthUserId = null;
 const WORKSPACE_STATE_KEY = "careflow.workspace.v2";
 const LEGACY_WORKSPACE_STATE_KEY = "careflow.workspace.v1";
@@ -1177,7 +1194,7 @@ async function inviteHospitalUser(event) {
 }
 
 function updateControls() {
-  const busy = uploading || saving || loadingCases || loadingActivity || loadingSettings || staffActionPending;
+  const busy = uploading || saving || loadingCases || loadingActivity || loadingSettings || staffActionPending || sourceViewerLoading;
   document.getElementById("uploadBtn").disabled = busy || editing || !organizationId;
   document.getElementById("reloadCasesBtn").disabled = busy || editing || !organizationId;
   const reloadActivityBtn = document.getElementById("reloadActivityBtn");
@@ -1203,6 +1220,7 @@ function updateControls() {
   const problem = approvalProblem(currentCase);
   document.getElementById("approveBtn").disabled = unavailable || !!problem || currentCase?.status === "Completed" || !document.getElementById("reviewConfirmed").checked;
   document.getElementById("correctionBtn").disabled = unavailable || currentCase?.status === "Correction Required";
+  document.getElementById("viewSourceBtn").disabled = unavailable || sourceViewerLoading;
   document.getElementById("editDetailsBtn").disabled = unavailable;
   document.getElementById("reviewConfirmed").disabled = unavailable || !!problem || currentCase?.status === "Completed";
   document.getElementById("approvalGuidance").textContent = currentCase ? problem || (currentCase.status === "Completed" ? "This case is completed. Editing details will reopen it for review." : "Check the saved details, then tick the confirmation box to enable approval.") : "";
@@ -1211,6 +1229,7 @@ function updateControls() {
 
 function clearReview() {
   reviewRequest += 1;
+  if (!document.getElementById("sourceViewerModal").hidden) closeSourceViewer();
   currentCase = null;
   closeEditor();
   document.getElementById("reviewConfirmed").checked = false;
@@ -1298,6 +1317,70 @@ async function loadCases() {
   } finally {
     if (request === listRequest && requestedOrganization === organizationId) {
       loadingCases = false;
+      updateControls();
+    }
+  }
+}
+
+function closeSourceViewer() {
+  sourceViewerRequest += 1;
+  sourceViewerLoading = false;
+  const modal = document.getElementById("sourceViewerModal");
+  const frame = document.getElementById("sourcePdfFrame");
+  const status = document.getElementById("sourceViewerStatus");
+  if (modal) modal.hidden = true;
+  if (frame) frame.src = "about:blank";
+  if (status) status.textContent = "";
+  updateControls();
+}
+
+async function openSourceViewer() {
+  if (sourceViewerLoading || saving || uploading || loadingCases || editing || !organizationId || !currentCase?.document_id) return;
+  const request = ++sourceViewerRequest;
+  const requestedOrganization = organizationId;
+  const selectedCaseId = currentCase.id;
+  const selectedDocumentId = currentCase.document_id;
+  const modal = document.getElementById("sourceViewerModal");
+  const frame = document.getElementById("sourcePdfFrame");
+  const status = document.getElementById("sourceViewerStatus");
+  const fileName = document.getElementById("sourceViewerFileName");
+
+  sourceViewerLoading = true;
+  modal.hidden = false;
+  frame.src = "about:blank";
+  fileName.textContent = currentCase.file_name || "Source document";
+  status.textContent = "Creating a protected document view...";
+  updateControls();
+
+  try {
+    const { data, error } = await supabaseClient.functions.invoke("view-document", {
+      body: { document_id: selectedDocumentId, case_id: selectedCaseId }
+    });
+    if (request !== sourceViewerRequest || requestedOrganization !== organizationId || currentCase?.document_id !== selectedDocumentId) return;
+    if (error) {
+      let details = error.message || "Could not open the source document.";
+      try {
+        if (error.context) {
+          const body = await error.context.clone().json();
+          details = body.error || body.message || details;
+        }
+      } catch (_) { /* Keep the original function error. */ }
+      throw new Error(details);
+    }
+    if (!data?.success || !data?.signed_url) throw new Error(data?.error || "Secure document link was not returned.");
+    frame.src = data.signed_url;
+    fileName.textContent = data.file_name || currentCase.file_name || "Source document";
+    const minutes = Math.max(1, Math.round((Number(data.expires_in) || 300) / 60));
+    status.textContent = "Protected viewer loaded. The temporary access link expires in about " + minutes + " minute" + (minutes === 1 ? "" : "s") + ". Close the viewer when finished.";
+    document.getElementById("closeSourceViewerBtn").focus();
+  } catch (error) {
+    if (request === sourceViewerRequest && requestedOrganization === organizationId) {
+      frame.src = "about:blank";
+      status.textContent = "Could not open the source PDF. " + (error.message || "Please try again.");
+    }
+  } finally {
+    if (request === sourceViewerRequest) {
+      sourceViewerLoading = false;
       updateControls();
     }
   }
@@ -1880,6 +1963,10 @@ async function saveCaseChange(payload, fromEditor) {
 
 document.getElementById("approveBtn").addEventListener("click", function() { saveCaseStatus("Completed"); });
 document.getElementById("correctionBtn").addEventListener("click", function() { saveCaseStatus("Correction Required"); });
+document.getElementById("viewSourceBtn").addEventListener("click", openSourceViewer);
+document.getElementById("closeSourceViewerBtn").addEventListener("click", closeSourceViewer);
+document.getElementById("sourceViewerModal").addEventListener("click", function(event) { if (event.target === this) closeSourceViewer(); });
+window.addEventListener("keydown", function(event) { if (event.key === "Escape" && !document.getElementById("sourceViewerModal").hidden) closeSourceViewer(); });
 document.getElementById("editDetailsBtn").addEventListener("click", editDetails);
 document.getElementById("cancelEditBtn").addEventListener("click", function() { closeEditor(); persistWorkspaceState(); document.getElementById("reviewActionStatus").textContent = "Changes cancelled. Saved details were not changed."; updateControls(); });
 document.getElementById("correctionForm").addEventListener("submit", saveCorrections);
@@ -1907,6 +1994,7 @@ supabaseClient.auth.onAuthStateChange(function(event, session) {
   }
   if (event === "SIGNED_OUT") {
     recoveryFlowRequested = false;
+    closeSourceViewer();
     setSignupPanelVisible(false);
     setPasswordPanelVisible(false);
     authRequest += 1;

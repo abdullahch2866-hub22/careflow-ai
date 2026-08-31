@@ -155,6 +155,19 @@ test('a fresh page reload restores saved cases, details, and status without uplo
   assert.equal(reloaded.queries().some(query => query.startsWith('storage') || query.startsWith('invoke')), false);
 });
 
+test('opens the source PDF through the secure viewer function and clears it when closed', async () => {
+  const p = await page();
+  await p.review(7);
+  await p.click('viewSourceBtn');
+  assert.equal(p.element('sourceViewerModal').hidden, false);
+  assert.match(p.element('sourcePdfFrame').src, /fixture\.invalid\/secure-source\.pdf\?token=temporary/);
+  assert.match(p.text('sourceViewerStatus'), /temporary access link expires/i);
+  assert.ok(p.queries().some(query => query === 'invoke view-document fixture-document-7 case 7'));
+  await p.click('closeSourceViewerBtn');
+  assert.equal(p.element('sourceViewerModal').hidden, true);
+  assert.equal(p.element('sourcePdfFrame').src, 'about:blank');
+});
+
 test('failed saves keep the previous status and re-enable the controls', async () => {
   const p = await page();
   await p.review(7);

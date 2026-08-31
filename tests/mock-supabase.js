@@ -75,7 +75,15 @@ window.supabase = { createClient() { return {
   },
   from: fixtureQuery,
   storage: { from() { return { async upload(path, file, options) { recordFixtureQuery("storage upload " + JSON.stringify([path,options])); return { data: {}, error: null }; } }; } },
-  functions: { async invoke() {
+  functions: { async invoke(name, options = {}) {
+    if (name === "view-document") {
+      const documentId = options?.body?.document_id;
+      const caseId = options?.body?.case_id;
+      recordFixtureQuery("invoke view-document " + documentId + " case " + caseId);
+      const row = fixtureCases.find(item => item.id === caseId && item.document_id === documentId && item.organization_id === fixtureOrg);
+      if (!row) return { data: null, error: { message: "Fixture: source access denied" } };
+      return { data: { success: true, signed_url: "https://fixture.invalid/secure-source.pdf?token=temporary", expires_in: 300, file_name: row.file_name }, error: null };
+    }
     recordFixtureQuery("invoke process-document");
     const extracted = { patient_name: "Uploaded Sample Patient", document_date: "2026-08-31", insurance_information: "Uploaded sample insurer", missing_information: "Sample missing contact" };
     Object.assign(fixtureCases.find(row => row.id === 9), extracted, { review_revision: 1 });
