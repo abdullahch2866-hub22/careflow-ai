@@ -226,6 +226,15 @@
     .member-meta { color: #64748b; font-size: 13px; margin-top: 5px; }
     .role-badge { padding: 6px 12px; border-radius: 999px; background: #e0e7ff; color: #3730a3; font-size: 12px; font-weight: 700; text-transform: capitalize; }
     .current-user-badge { margin-left: 8px; color: #166534; font-size: 12px; font-weight: 700; }
+    .account-badge { margin-left: 8px; color: #475569; font-size: 12px; font-weight: 700; }
+    .staff-admin-panel { padding: 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
+    .staff-admin-panel h3 { margin-bottom: 6px; }
+    .staff-invite-form { display: grid; grid-template-columns: minmax(220px, 1fr) 150px auto; gap: 12px; align-items: end; margin-top: 16px; }
+    .staff-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 700; color: #334155; }
+    .staff-field input, .staff-field select, .member-actions select { padding: 10px 11px; border: 1px solid #94a3b8; border-radius: 7px; font-size: 15px; background: white; color: #172033; }
+    .member-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+    .member-action-btn { padding: 8px 12px; }
+    .button.danger { background: #dc2626; color: white; }
     button:disabled { opacity: 0.55; cursor: not-allowed; }
     button:focus-visible { outline: 3px solid #2563eb; outline-offset: 3px; }
     .status[data-status="Review"] { background: #dbeafe; color: #1e40af; }
@@ -250,6 +259,9 @@
     @media (max-width: 600px) {
       .case { align-items: flex-start; flex-direction: column; }
       .review-grid { grid-template-columns: 1fr; }
+      .staff-invite-form { grid-template-columns: 1fr; }
+      .member-row { align-items: flex-start; flex-direction: column; }
+      .member-actions { width: 100%; justify-content: flex-start; }
       .main { min-width: 0; padding: 18px; }
       .sidebar { display: none; }
     }
@@ -397,8 +409,22 @@
           <button type="button" id="reloadUsersBtn" class="button" disabled>Reload users</button>
         </div>
         <p id="usersStatus" role="status" style="padding:12px 20px;"></p>
+        <div id="staffAdminPanel" class="staff-admin-panel" hidden>
+          <h3>Invite hospital staff</h3>
+          <p class="review-help">Admins can invite staff or another admin. Permissions are enforced by the CareFlow backend, not only by these controls.</p>
+          <form id="inviteUserForm" class="staff-invite-form" autocomplete="off">
+            <label class="staff-field" for="inviteUserEmail">Email address
+              <input id="inviteUserEmail" type="email" maxlength="320" required placeholder="staff@example.com">
+            </label>
+            <label class="staff-field" for="inviteUserRole">Role
+              <select id="inviteUserRole"><option value="staff">Staff</option><option value="admin">Admin</option></select>
+            </label>
+            <button type="submit" id="inviteUserBtn" class="button">Send invite</button>
+          </form>
+          <p id="staffActionStatus" role="status" class="review-help" style="margin-top:12px;"></p>
+        </div>
         <div id="usersList"></div>
-        <p class="review-help" style="padding:0 20px 20px;">Only members of this hospital are shown. Inviting, changing roles, and removing users will be added as a separate secured workflow.</p>
+        <p class="review-help" style="padding:0 20px 20px;">Only members of this hospital are shown. Admin actions are protected on the backend, self-removal and self-demotion are blocked, and the hospital must always retain an admin.</p>
       </section>
 
 <section id="reviewPanel" class="recent" style="display:none; margin-top:30px;">
@@ -534,6 +560,7 @@ let organizationSettings = null;
 let organizationMembers = [];
 let loadingSettings = false;
 let settingsRequest = 0;
+let staffActionPending = false;
 let activeView = "dashboard";
 let editing = false;
 const EDIT_FIELDS = { editPatientName: "patient_name", editDocumentType: "document_type", editDocumentDate: "document_date", editInsurance: "insurance_information", editMissingInfo: "missing_information", editReviewNotes: "review_notes" };
@@ -740,7 +767,10 @@ async function switchWorkspaceView(view) {
   renderWorkspaceView();
   if (view === "activity") await loadActivityLog();
   if (view === "organization") await loadOrganizationSettings();
-  if (view === "users") await loadOrganizationMembers();
+  if (view === "users") {
+    await loadOrganizationSettings();
+    await loadOrganizationMembers();
+  }
 }
 
 function changedActivityFields(entry) {
@@ -828,11 +858,21 @@ function formatWorkspaceDate(value) {
   return Number.isNaN(date.getTime()) ? "Not available" : date.toLocaleDateString();
 }
 
+function isOrganizationAdmin() {
+  return organizationSettings?.my_role === "admin";
+}
+
+function renderStaffAdminVisibility() {
+  const panel = document.getElementById("staffAdminPanel");
+  if (panel) panel.hidden = !isOrganizationAdmin();
+}
+
 function renderOrganizationSettings() {
   document.getElementById("organizationName").textContent = organizationSettings?.organization_name || "Not available";
   document.getElementById("organizationRole").textContent = organizationSettings?.my_role || "Not available";
   document.getElementById("organizationMemberCount").textContent = organizationSettings?.member_count == null ? "—" : String(organizationSettings.member_count);
   document.getElementById("organizationCreatedAt").textContent = formatWorkspaceDate(organizationSettings?.organization_created_at);
+  renderStaffAdminVisibility();
 }
 
 async function loadOrganizationSettings() {
@@ -871,6 +911,7 @@ async function loadOrganizationSettings() {
 function renderOrganizationMembers() {
   const list = document.getElementById("usersList");
   list.replaceChildren();
+  renderStaffAdminVisibility();
   if (organizationMembers.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
@@ -891,16 +932,61 @@ function renderOrganizationMembers() {
       current.textContent = "You";
       email.append(current);
     }
+    const account = document.createElement("span");
+    account.className = "account-badge";
+    account.textContent = member.account_status || "Active";
+    email.append(account);
     const meta = document.createElement("div");
     meta.className = "member-meta";
     meta.textContent = "Joined " + formatWorkspaceDate(member.joined_at);
     details.append(email, meta);
-    const role = document.createElement("span");
-    role.className = "role-badge";
-    role.textContent = member.role || "member";
-    row.append(details, role);
+
+    const actions = document.createElement("div");
+    actions.className = "member-actions";
+    if (isOrganizationAdmin() && !member.is_current) {
+      const roleSelect = document.createElement("select");
+      roleSelect.className = "staff-manage-control";
+      roleSelect.setAttribute("aria-label", "Role for " + (member.email || "hospital user"));
+      ["staff", "admin"].forEach(function(value) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value === "admin" ? "Admin" : "Staff";
+        if (member.role === value) option.selected = true;
+        roleSelect.append(option);
+      });
+
+      const saveRole = document.createElement("button");
+      saveRole.type = "button";
+      saveRole.className = "button member-action-btn staff-manage-control";
+      saveRole.textContent = "Save role";
+      saveRole.addEventListener("click", function() {
+        if (roleSelect.value === member.role) {
+          document.getElementById("staffActionStatus").textContent = "No role change is needed for " + member.email + ".";
+          return;
+        }
+        runStaffAction({ action: "change_role", email: member.email, role: roleSelect.value }, "Updating role...");
+      });
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "button danger member-action-btn staff-manage-control";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", function() {
+        if (!window.confirm("Remove " + member.email + " from this hospital? Their CareFlow sign-in account will not be deleted.")) return;
+        runStaffAction({ action: "remove", email: member.email }, "Removing user...");
+      });
+      actions.append(roleSelect, saveRole, remove);
+    } else {
+      const role = document.createElement("span");
+      role.className = "role-badge";
+      role.textContent = member.role || "member";
+      actions.append(role);
+    }
+
+    row.append(details, actions);
     list.append(row);
   });
+  updateControls();
 }
 
 async function loadOrganizationMembers() {
@@ -912,7 +998,7 @@ async function loadOrganizationMembers() {
   loadingSettings = true;
   updateControls();
   try {
-    const { data, error } = await supabaseClient.rpc("careflow_my_organization_members");
+    const { data, error } = await supabaseClient.rpc("careflow_my_organization_members_v2");
     if (request !== settingsRequest || requestedOrganization !== organizationId) return false;
     if (error) throw error;
     organizationMembers = Array.isArray(data) ? data : [];
@@ -934,8 +1020,63 @@ async function loadOrganizationMembers() {
   }
 }
 
+async function invokeStaffManagement(payload) {
+  const { data, error } = await supabaseClient.functions.invoke("manage-staff", { body: payload });
+  if (error) {
+    let details = error.message || "Staff management failed.";
+    try {
+      if (error.context) {
+        const body = await error.context.clone().json();
+        details = body.error || body.message || details;
+      }
+    } catch (_) { /* Use the original function error. */ }
+    throw new Error(details);
+  }
+  if (!data?.success) throw new Error(data?.error || "Staff management did not confirm success.");
+  return data;
+}
+
+async function runStaffAction(payload, pendingMessage) {
+  if (!organizationId || !isOrganizationAdmin() || staffActionPending) return false;
+  const requestedOrganization = organizationId;
+  const status = document.getElementById("staffActionStatus");
+  staffActionPending = true;
+  status.textContent = pendingMessage;
+  updateControls();
+  try {
+    const result = await invokeStaffManagement(payload);
+    if (requestedOrganization !== organizationId) return false;
+    await loadOrganizationSettings();
+    await loadOrganizationMembers();
+    status.textContent = result.message || "Staff settings updated.";
+    return true;
+  } catch (error) {
+    if (requestedOrganization === organizationId) {
+      status.textContent = "Could not update staff. " + (error.message || "Please try again.");
+    }
+    return false;
+  } finally {
+    staffActionPending = false;
+    updateControls();
+  }
+}
+
+async function inviteHospitalUser(event) {
+  event.preventDefault();
+  if (!isOrganizationAdmin() || staffActionPending) return;
+  const emailInput = document.getElementById("inviteUserEmail");
+  const roleInput = document.getElementById("inviteUserRole");
+  const email = emailInput.value.trim().toLowerCase();
+  if (!email) {
+    document.getElementById("staffActionStatus").textContent = "Enter the staff member's email address.";
+    return;
+  }
+  const success = await runStaffAction({ action: "invite", email, role: roleInput.value }, "Sending secure invitation...");
+  if (success) emailInput.value = "";
+}
+
 function updateControls() {
-  const busy = uploading || saving || loadingCases || loadingActivity || loadingSettings;
+  const busy = uploading || saving || loadingCases || loadingActivity || loadingSettings || staffActionPending;
   document.getElementById("uploadBtn").disabled = busy || editing || !organizationId;
   document.getElementById("reloadCasesBtn").disabled = busy || editing || !organizationId;
   const reloadActivityBtn = document.getElementById("reloadActivityBtn");
@@ -944,6 +1085,12 @@ function updateControls() {
   if (reloadOrganizationBtn) reloadOrganizationBtn.disabled = busy || editing || !organizationId;
   const reloadUsersBtn = document.getElementById("reloadUsersBtn");
   if (reloadUsersBtn) reloadUsersBtn.disabled = busy || editing || !organizationId;
+  const inviteUserBtn = document.getElementById("inviteUserBtn");
+  const inviteUserEmail = document.getElementById("inviteUserEmail");
+  const inviteUserRole = document.getElementById("inviteUserRole");
+  if (inviteUserBtn) inviteUserBtn.disabled = busy || !isOrganizationAdmin();
+  if (inviteUserEmail) inviteUserEmail.disabled = busy || !isOrganizationAdmin();
+  if (inviteUserRole) inviteUserRole.disabled = busy || !isOrganizationAdmin();
   WORKSPACE_NAV_IDS.forEach(function(id) {
     const button = document.getElementById(id);
     if (button) button.disabled = busy || editing || !organizationId;
@@ -1114,6 +1261,7 @@ async function updateAuthUI() {
   organizationMembers = [];
   loadingActivity = false;
   loadingSettings = false;
+  staffActionPending = false;
   activeView = "dashboard";
   resetDashboardMetrics();
   clearReview();
@@ -1182,7 +1330,12 @@ if (reloadActivityBtn) reloadActivityBtn.addEventListener("click", loadActivityL
 const reloadOrganizationBtn = document.getElementById("reloadOrganizationBtn");
 if (reloadOrganizationBtn) reloadOrganizationBtn.addEventListener("click", loadOrganizationSettings);
 const reloadUsersBtn = document.getElementById("reloadUsersBtn");
-if (reloadUsersBtn) reloadUsersBtn.addEventListener("click", loadOrganizationMembers);
+if (reloadUsersBtn) reloadUsersBtn.addEventListener("click", async function() {
+  await loadOrganizationSettings();
+  await loadOrganizationMembers();
+});
+const inviteUserForm = document.getElementById("inviteUserForm");
+if (inviteUserForm) inviteUserForm.addEventListener("submit", inviteHospitalUser);
 
 document.getElementById("uploadBtn").addEventListener("click", function() {
   document.getElementById("documentInput").click();
@@ -1367,12 +1520,15 @@ supabaseClient.auth.onAuthStateChange(function(event) {
     loadingCases = false;
     loadingActivity = false;
     loadingSettings = false;
+    staffActionPending = false;
     activeView = "dashboard";
     resetDashboardMetrics();
     clearReview();
     renderWorkspaceView();
     document.getElementById("uploadStatus").textContent = "";
     document.getElementById("caseListStatus").textContent = "";
+    const staffActionStatus = document.getElementById("staffActionStatus");
+    if (staffActionStatus) staffActionStatus.textContent = "";
     document.getElementById("loginPanel").style.display = "block";
     document.querySelector(".header").style.display = "none";
     document.querySelector(".layout").style.display = "none";
