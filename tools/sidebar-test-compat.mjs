@@ -82,6 +82,28 @@ replaceOnce(`function renderWorkspaceView() {
   if (!isActivity) renderCases();
 }`, 'test-compatible renderWorkspaceView');
 
+replaceOnce(`  const visibleCases = casesForActiveView();
+  if (visibleCases.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = emptyMessageForActiveView();
+    container.append(empty);
+    updateControls();
+    return;
+  }
+  visibleCases.forEach(function(caseRow) {`, `  const visibleCases = casesForActiveView();
+  if (visibleCases.length === 0) {
+    if (activeView !== "dashboard") {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = emptyMessageForActiveView();
+      container.append(empty);
+    }
+    updateControls();
+    return;
+  }
+  visibleCases.forEach(function(caseRow) {`, 'preserve empty dashboard list');
+
 replaceOnce(`  document.getElementById("reloadActivityBtn").disabled = busy || editing || !organizationId;
   WORKSPACE_NAV_IDS.forEach(function(id) { document.getElementById(id).disabled = busy || editing || !organizationId; });`, `  const reloadActivityBtn = document.getElementById("reloadActivityBtn");
   if (reloadActivityBtn) reloadActivityBtn.disabled = busy || editing || !organizationId;
