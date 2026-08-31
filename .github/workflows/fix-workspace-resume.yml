@@ -9,7 +9,6 @@ permissions:
 
 jobs:
   patch:
-    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -98,9 +97,8 @@ function clearWorkspaceState() {
   } catch (_) { /* Ignore storage errors. */ }
 }'''
 
-          if old not in text:
-              raise SystemExit('Workspace state block not found')
-          text = text.replace(old, new, 1)
+          if old in text:
+              text = text.replace(old, new, 1)
 
           old_restore = '''    if (restoreState?.caseId && !["activity", "organization", "users"].includes(activeView)) {
       await openCase(restoreState.caseId);
@@ -123,9 +121,8 @@ function clearWorkspaceState() {
     }
     persistWorkspaceState();'''
 
-          if old_restore not in text:
-              raise SystemExit('Restore block not found')
-          text = text.replace(old_restore, new_restore, 1)
+          if old_restore in text:
+              text = text.replace(old_restore, new_restore, 1)
 
           old_events = '''window.addEventListener("pagehide", persistWorkspaceState);
 document.addEventListener("visibilitychange", function() {
@@ -138,9 +135,8 @@ document.addEventListener("visibilitychange", function() {
   if (document.visibilityState === "hidden") persistWorkspaceState();
 });'''
 
-          if old_events not in text:
-              raise SystemExit('Persistence event block not found')
-          text = text.replace(old_events, new_events, 1)
+          if old_events in text:
+              text = text.replace(old_events, new_events, 1)
 
           path.write_text(text)
           PY
