@@ -292,8 +292,36 @@
 
   <button type="button" id="loginBtn" class="button">Sign In</button>
   <button type="button" id="forgotPasswordBtn" class="button secondary" style="margin-left:8px;">Forgot password</button>
+  <button type="button" id="showSignupBtn" class="button secondary" style="margin-left:8px;">Create hospital workspace</button>
 
   <p id="loginStatus" role="status" style="margin-top:12px;"></p>
+</div>
+
+<div id="signupPanel" hidden style="background:white; padding:25px; margin:25px; border:1px solid #e5e7eb; border-radius:12px; max-width:760px;">
+  <h2 style="margin-bottom:8px;">Create a hospital workspace</h2>
+  <p style="color:#64748b; margin-bottom:18px; line-height:1.5;">For a new hospital or clinic. The first account becomes that hospital's Admin. Existing staff should use an invitation from their hospital Admin.</p>
+  <form id="signupForm" autocomplete="off">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; max-width:700px;">
+      <label class="staff-field" for="signupHospitalName">Hospital / clinic name
+        <input id="signupHospitalName" maxlength="120" required placeholder="Example Medical Center">
+      </label>
+      <label class="staff-field" for="signupEmail">Admin email address
+        <input id="signupEmail" type="email" maxlength="320" autocomplete="email" required placeholder="admin@example.com">
+      </label>
+      <label class="staff-field" for="signupPassword">Password
+        <input id="signupPassword" type="password" minlength="15" autocomplete="new-password" required placeholder="Create a strong password">
+      </label>
+      <label class="staff-field" for="signupPasswordConfirm">Confirm password
+        <input id="signupPasswordConfirm" type="password" minlength="15" autocomplete="new-password" required placeholder="Confirm password">
+      </label>
+    </div>
+    <p style="color:#64748b; margin-top:12px; line-height:1.5;">Use at least 15 characters with uppercase, lowercase, a number, and a symbol.</p>
+    <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">
+      <button type="submit" id="signupBtn" class="button">Create hospital account</button>
+      <button type="button" id="signupCancelBtn" class="button secondary">Back to login</button>
+    </div>
+  </form>
+  <p id="signupStatus" role="status" style="margin-top:12px;"></p>
 </div>
 
 <div id="passwordPanel" hidden style="background:white; padding:25px; margin:25px; border:1px solid #e5e7eb; border-radius:12px; max-width:620px;">
@@ -1321,11 +1349,92 @@ async function openCase(caseId) {
   }
 }
 
+function setSignupPanelVisible(visible) {
+  const panel = document.getElementById("signupPanel");
+  if (!panel) return;
+  panel.hidden = !visible;
+  if (!visible) return;
+  document.getElementById("loginPanel").style.display = "none";
+  document.getElementById("passwordPanel").hidden = true;
+  document.getElementById("noAccessPanel").hidden = true;
+  document.querySelector(".header").style.display = "none";
+  document.querySelector(".layout").style.display = "none";
+  document.getElementById("signupStatus").textContent = "";
+  setTimeout(function() { document.getElementById("signupHospitalName").focus(); }, 0);
+}
+
+async function createHospitalAccount(event) {
+  event.preventDefault();
+  const hospitalInput = document.getElementById("signupHospitalName");
+  const emailInput = document.getElementById("signupEmail");
+  const passwordInput = document.getElementById("signupPassword");
+  const confirmationInput = document.getElementById("signupPasswordConfirm");
+  const button = document.getElementById("signupBtn");
+  const status = document.getElementById("signupStatus");
+  const hospitalName = hospitalInput.value.trim().replace(/\s+/g, " ");
+  const email = emailInput.value.trim().toLowerCase();
+  const password = passwordInput.value;
+  const confirmation = confirmationInput.value;
+
+  if (hospitalName.length < 2 || hospitalName.length > 120) {
+    status.textContent = "Enter a hospital or clinic name between 2 and 120 characters.";
+    hospitalInput.focus();
+    return;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    status.textContent = "Enter a valid admin email address.";
+    emailInput.focus();
+    return;
+  }
+  if (password.length < 15 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/[0-9]/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+    status.textContent = "Use at least 15 characters with uppercase, lowercase, a number, and a symbol.";
+    passwordInput.focus();
+    return;
+  }
+  if (password !== confirmation) {
+    status.textContent = "The two passwords do not match.";
+    confirmationInput.focus();
+    return;
+  }
+
+  button.disabled = true;
+  status.textContent = "Creating your CareFlow account...";
+  try {
+    const { data, error } = await supabaseClient.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: CAREFLOW_APP_URL,
+        data: {
+          careflow_signup_type: "hospital_owner",
+          careflow_hospital_name: hospitalName,
+          careflow_password_set: true
+        }
+      }
+    });
+    if (error) throw error;
+    passwordInput.value = "";
+    confirmationInput.value = "";
+    if (data?.session) {
+      status.textContent = "Account created. Creating your hospital workspace...";
+      setSignupPanelVisible(false);
+      await updateAuthUI();
+    } else {
+      status.textContent = "Account created. Check the newest verification email, verify the address, then return to CareFlow. Your hospital workspace will be created automatically after verification.";
+    }
+  } catch (error) {
+    status.textContent = "Could not create the hospital account. " + (error.message || "Please try again.");
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function setPasswordPanelVisible(visible, mode = "setup") {
   const panel = document.getElementById("passwordPanel");
   passwordFlowMode = visible ? mode : null;
   panel.hidden = !visible;
   if (!visible) return;
+  setSignupPanelVisible(false);
   document.getElementById("loginPanel").style.display = "none";
   document.querySelector(".header").style.display = "none";
   document.querySelector(".layout").style.display = "none";
@@ -1344,6 +1453,7 @@ function setNoAccessVisible(visible, email = "") {
   if (!panel) return;
   panel.hidden = !visible;
   if (!visible) return;
+  setSignupPanelVisible(false);
   clearWorkspaceState();
   activeView = "dashboard";
   organizationId = null;
@@ -1462,6 +1572,7 @@ async function updateAuthUI() {
     }
     if (error) throw error;
     currentAuthUserId = user.id;
+    setSignupPanelVisible(false);
     const restoreState = readWorkspaceState(user.id);
     activeView = restoreState?.view || "dashboard";
     renderWorkspaceView();
@@ -1473,18 +1584,37 @@ async function updateAuthUI() {
     }
     setPasswordPanelVisible(false);
     document.getElementById("loginPanel").style.display = "none";
-    document.querySelector(".header").style.display = "flex";
-    document.querySelector(".layout").style.display = "flex";
     const { data: membership, error: membershipError } = await supabaseClient
       .from("organization_members").select("organization_id").eq("user_id", user.id).single();
     if (request !== authRequest) return;
     const noMembership = membershipError?.code === "PGRST116" || /0 rows|no rows|multiple \(or no\) rows/i.test(membershipError?.details || membershipError?.message || "");
     if (membershipError && !noMembership) throw membershipError;
-    if (!membership || noMembership) {
-      setNoAccessVisible(true, user.email || "");
-      return;
+
+    let resolvedOrganizationId = membership && !noMembership ? membership.organization_id : null;
+    if (!resolvedOrganizationId) {
+      if (user.user_metadata?.careflow_signup_type === "hospital_owner") {
+        document.getElementById("loginStatus").textContent = "Creating your hospital workspace...";
+        const { data: onboardingData, error: onboardingError } = await supabaseClient.rpc("complete_hospital_onboarding");
+        if (request !== authRequest) return;
+        if (onboardingError) throw onboardingError;
+        const onboarding = Array.isArray(onboardingData) ? onboardingData[0] : onboardingData;
+        if (onboarding?.organization_id) {
+          resolvedOrganizationId = onboarding.organization_id;
+        } else if (onboarding?.onboarding_state === "already_completed") {
+          setNoAccessVisible(true, user.email || "");
+          return;
+        } else {
+          throw new Error("Hospital onboarding did not return a workspace.");
+        }
+      } else {
+        setNoAccessVisible(true, user.email || "");
+        return;
+      }
     }
-    organizationId = membership.organization_id;
+
+    organizationId = resolvedOrganizationId;
+    document.querySelector(".header").style.display = "flex";
+    document.querySelector(".layout").style.display = "flex";
     renderWorkspaceView();
     updateControls();
     await Promise.all([loadCases(), loadDashboardMetrics()]);
@@ -1537,6 +1667,12 @@ document.getElementById("loginBtn").addEventListener("click", async function() {
 });
 
 document.getElementById("forgotPasswordBtn").addEventListener("click", requestPasswordReset);
+document.getElementById("showSignupBtn").addEventListener("click", function() { setSignupPanelVisible(true); });
+document.getElementById("signupForm").addEventListener("submit", createHospitalAccount);
+document.getElementById("signupCancelBtn").addEventListener("click", function() {
+  setSignupPanelVisible(false);
+  document.getElementById("loginPanel").style.display = "block";
+});
 document.getElementById("passwordSetupForm").addEventListener("submit", saveNewPassword);
 document.getElementById("passwordCancelBtn").addEventListener("click", leavePasswordFlow);
 document.getElementById("signOutBtn").addEventListener("click", async function() {
@@ -1771,6 +1907,7 @@ supabaseClient.auth.onAuthStateChange(function(event, session) {
   }
   if (event === "SIGNED_OUT") {
     recoveryFlowRequested = false;
+    setSignupPanelVisible(false);
     setPasswordPanelVisible(false);
     authRequest += 1;
     listRequest += 1;
