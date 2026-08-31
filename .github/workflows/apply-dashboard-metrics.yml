@@ -1,0 +1,250 @@
+name: Apply live dashboard metrics
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-dashboard:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Patch dashboard metrics
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('index.html')
+          text = path.read_text()
+
+          def replace_once(old, new):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'Expected exactly one match, found {count}: {old[:80]!r}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+          '''        <div class="card">
+          <div class="card-title">Documents Today</div>
+          <div class="card-number">24</div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Awaiting Review</div>
+          <div class="card-number">7</div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Completed</div>
+          <div class="card-number">17</div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Time Saved</div>
+          <div class="card-number">6.4h</div>
+        </div>''',
+          '''        <div class="card">
+          <div class="card-title">Documents Today</div>
+          <div class="card-number" id="metricDocumentsToday" aria-live="polite">—</div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Awaiting Review</div>
+          <div class="card-number" id="metricAwaitingReview" aria-live="polite">—</div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Completed</div>
+          <div class="card-number" id="metricCompleted" aria-live="polite">—</div>
+        </div>
+
+        <div class="card" title="Estimated at 15 minutes saved per completed case.">
+          <div class="card-title">Estimated Time Saved</div>
+          <div class="card-number" id="metricTimeSaved" aria-live="polite">—</div>
+        </div>''')
+
+          replace_once(
+          '''      </section>
+
+      <section class="upload">''',
+          '''      </section>
+      <p id="dashboardMetricsStatus" role="status" style="margin-top:-18px; margin-bottom:24px; color:#b91c1c;"></p>
+
+      <section class="upload">''')
+
+          replace_once(
+          '''    #caseListStatus:empty { display: none; }''',
+          '''    #caseListStatus:empty, #dashboardMetricsStatus:empty { display: none; }''')
+
+          replace_once(
+          '''const CASE_LIST_LIMIT = 50;
+const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;''',
+          '''const CASE_LIST_LIMIT = 50;
+const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
+const ESTIMATED_MINUTES_SAVED_PER_COMPLETED_CASE = 15;''')
+
+          replace_once(
+          '''let authRequest = 0;
+let listRequest = 0;
+let reviewRequest = 0;''',
+          '''let authRequest = 0;
+let listRequest = 0;
+let reviewRequest = 0;
+let dashboardRequest = 0;''')
+
+          replace_once(
+          '''function updateControls() {''',
+          '''function resetDashboardMetrics(message = "") {
+  document.getElementById("metricDocumentsToday").textContent = "—";
+  document.getElementById("metricAwaitingReview").textContent = "—";
+  document.getElementById("metricCompleted").textContent = "—";
+  document.getElementById("metricTimeSaved").textContent = "—";
+  document.getElementById("dashboardMetricsStatus").textContent = message;
+}
+
+function localDayBoundsIso() {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
+function formatEstimatedTimeSaved(completedCount) {
+  const minutes = completedCount * ESTIMATED_MINUTES_SAVED_PER_COMPLETED_CASE;
+  if (minutes < 60) return minutes + "m";
+  const hours = minutes / 60;
+  return (Number.isInteger(hours) ? hours.toFixed(0) : hours.toFixed(1)) + "h";
+}
+
+async function loadDashboardMetrics() {
+  if (!organizationId) {
+    resetDashboardMetrics();
+    return false;
+  }
+  const request = ++dashboardRequest;
+  const requestedOrganization = organizationId;
+  const bounds = localDayBoundsIso();
+  const status = document.getElementById("dashboardMetricsStatus");
+  status.textContent = "Updating dashboard totals...";
+  try {
+    const [todayResult, awaitingResult, completedResult] = await Promise.all([
+      supabaseClient.from("cases").select("id", { count: "exact", head: true })
+        .eq("organization_id", requestedOrganization)
+        .gte("created_at", bounds.start).lt("created_at", bounds.end),
+      supabaseClient.from("cases").select("id", { count: "exact", head: true })
+        .eq("organization_id", requestedOrganization)
+        .in("status", ["Review", "Correction Required"]),
+      supabaseClient.from("cases").select("id", { count: "exact", head: true })
+        .eq("organization_id", requestedOrganization)
+        .eq("status", "Completed")
+    ]);
+    if (request !== dashboardRequest || requestedOrganization !== organizationId) return false;
+    const failed = [todayResult, awaitingResult, completedResult].find(function(result) { return result.error; });
+    if (failed) throw failed.error;
+    const documentsToday = todayResult.count ?? 0;
+    const awaitingReview = awaitingResult.count ?? 0;
+    const completed = completedResult.count ?? 0;
+    document.getElementById("metricDocumentsToday").textContent = String(documentsToday);
+    document.getElementById("metricAwaitingReview").textContent = String(awaitingReview);
+    document.getElementById("metricCompleted").textContent = String(completed);
+    document.getElementById("metricTimeSaved").textContent = formatEstimatedTimeSaved(completed);
+    status.textContent = "";
+    return true;
+  } catch (error) {
+    if (request === dashboardRequest && requestedOrganization === organizationId) {
+      resetDashboardMetrics("Could not load dashboard totals. Use Reload cases to retry.");
+      console.error("Dashboard metrics load failed:", error);
+    }
+    return false;
+  }
+}
+
+function updateControls() {''')
+
+          replace_once(
+          '''  listRequest += 1;
+  clearReview();''',
+          '''  listRequest += 1;
+  dashboardRequest += 1;
+  resetDashboardMetrics();
+  clearReview();''')
+
+          replace_once(
+          '''    updateControls();
+    await loadCases();''',
+          '''    updateControls();
+    await Promise.all([loadCases(), loadDashboardMetrics()]);''')
+
+          replace_once(
+          '''document.getElementById("reloadCasesBtn").addEventListener("click", async function() {
+  clearReview();
+  await loadCases();
+});''',
+          '''document.getElementById("reloadCasesBtn").addEventListener("click", async function() {
+  clearReview();
+  await Promise.all([loadCases(), loadDashboardMetrics()]);
+});''')
+
+          replace_once(
+          '''    if (caseSaved && requestedAuth === authRequest && requestedOrganization === organizationId) await loadCases();''',
+          '''    if (caseSaved && requestedAuth === authRequest && requestedOrganization === organizationId) {
+      await Promise.all([loadCases(), loadDashboardMetrics()]);
+    }''')
+
+          replace_once(
+          '''    renderCases();
+    renderReview(currentCase);
+    message.textContent = fromEditor ?''',
+          '''    renderCases();
+    renderReview(currentCase);
+    await loadDashboardMetrics();
+    message.textContent = fromEditor ?''')
+
+          replace_once(
+          '''    listRequest += 1;
+    organizationId = null;''',
+          '''    listRequest += 1;
+    dashboardRequest += 1;
+    organizationId = null;''')
+
+          replace_once(
+          '''    loadingCases = false;
+    clearReview();''',
+          '''    loadingCases = false;
+    resetDashboardMetrics();
+    clearReview();''')
+
+          path.write_text(text)
+          PY
+
+      - name: Install test dependencies
+        run: npm ci
+
+      - name: Run test suite
+        run: npm test
+
+      - name: Commit dashboard metrics
+        shell: bash
+        run: |
+          if git diff --quiet -- index.html; then
+            echo "No dashboard changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Make dashboard metrics live"
+          git push
