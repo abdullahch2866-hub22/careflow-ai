@@ -9,6 +9,27 @@ function replaceOnce(oldText, newText, label) {
   text = text.replace(oldText, newText);
 }
 
+replaceOnce(
+  'const WORKSPACE_NAV_IDS = ["navDashboard", "navDocuments", "navReview", "navCompleted", "navActivity"];',
+  `const WORKSPACE_NAV_IDS = ["navDashboard", "navDocuments", "navReview", "navCompleted", "navActivity"];
+const NAV_VIEW_BY_ID = {
+  navDashboard: "dashboard",
+  navDocuments: "documents",
+  navReview: "review",
+  navCompleted: "completed",
+  navActivity: "activity"
+};
+
+function setNavSelected(button, selected) {
+  if (!button) return;
+  const classes = button.className.split(/\\s+/).filter(Boolean).filter(function(name) { return name !== "active"; });
+  if (selected) classes.push("active");
+  button.className = classes.join(" ");
+  button.setAttribute("aria-current", selected ? "page" : "false");
+}`,
+  'navigation map and selected state helper'
+);
+
 replaceOnce(`function renderWorkspaceView() {
   const config = VIEW_CONFIG[activeView] || VIEW_CONFIG.dashboard;
   document.getElementById("workspaceTitle").textContent = config.title;
@@ -55,16 +76,11 @@ replaceOnce(`function renderWorkspaceView() {
   if (activitySection) activitySection.hidden = !isActivity;
 
   WORKSPACE_NAV_IDS.forEach(function(id) {
-    const button = document.getElementById(id);
-    if (!button) return;
-    const selected = button.dataset.view === activeView;
-    button.classList.toggle("active", selected);
-    if (selected) button.setAttribute("aria-current", "page");
-    else button.removeAttribute("aria-current");
+    setNavSelected(document.getElementById(id), NAV_VIEW_BY_ID[id] === activeView);
   });
 
   if (!isActivity) renderCases();
-}`, 'null-safe renderWorkspaceView');
+}`, 'test-compatible renderWorkspaceView');
 
 replaceOnce(`  document.getElementById("reloadActivityBtn").disabled = busy || editing || !organizationId;
   WORKSPACE_NAV_IDS.forEach(function(id) { document.getElementById(id).disabled = busy || editing || !organizationId; });`, `  const reloadActivityBtn = document.getElementById("reloadActivityBtn");
@@ -86,7 +102,7 @@ document.getElementById("reloadCasesBtn").addEventListener("click", async functi
 
 document.getElementById("reloadActivityBtn").addEventListener("click", loadActivityLog);`, `WORKSPACE_NAV_IDS.forEach(function(id) {
   const button = document.getElementById(id);
-  if (button) button.addEventListener("click", function() { switchWorkspaceView(this.dataset.view); });
+  if (button) button.addEventListener("click", function() { switchWorkspaceView(NAV_VIEW_BY_ID[id]); });
 });
 
 document.getElementById("reloadCasesBtn").addEventListener("click", async function() {
@@ -95,6 +111,6 @@ document.getElementById("reloadCasesBtn").addEventListener("click", async functi
 });
 
 const reloadActivityBtn = document.getElementById("reloadActivityBtn");
-if (reloadActivityBtn) reloadActivityBtn.addEventListener("click", loadActivityLog);`, 'null-safe nav listeners');
+if (reloadActivityBtn) reloadActivityBtn.addEventListener("click", loadActivityLog);`, 'test-compatible nav listeners');
 
 fs.writeFileSync(path, text);
