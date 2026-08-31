@@ -309,6 +309,15 @@
   </form>
   <p id="passwordStatus" role="status" style="margin-top:12px;"></p>
 </div>
+
+<div id="noAccessPanel" hidden style="background:white; padding:32px; margin:25px; border:1px solid #e5e7eb; border-radius:14px; max-width:720px;">
+  <div style="font-size:14px; font-weight:700; color:#2563eb; margin-bottom:10px;">CareFlow AI</div>
+  <h2 style="margin-bottom:10px;">No hospital workspace access</h2>
+  <p style="color:#475569; line-height:1.6; margin-bottom:8px;">You no longer have access to a CareFlow hospital workspace. Contact your hospital administrator if you believe this is a mistake.</p>
+  <p id="noAccessEmail" style="color:#64748b; margin-bottom:20px;"></p>
+  <button type="button" id="noAccessSignOutBtn" class="button secondary">Sign Out</button>
+</div>
+
   <header class="header" style="display:none;">
     <div class="logo">CareFlow <span>AI</span></div>
     <div class="user" style="display:flex; align-items:center; gap:12px;">
@@ -1330,6 +1339,26 @@ function setPasswordPanelVisible(visible, mode = "setup") {
   setTimeout(function() { document.getElementById("newPassword").focus(); }, 0);
 }
 
+function setNoAccessVisible(visible, email = "") {
+  const panel = document.getElementById("noAccessPanel");
+  if (!panel) return;
+  panel.hidden = !visible;
+  if (!visible) return;
+  clearWorkspaceState();
+  activeView = "dashboard";
+  organizationId = null;
+  savedCases = [];
+  organizationSettings = null;
+  organizationMembers = [];
+  resetDashboardMetrics();
+  clearReview();
+  document.getElementById("noAccessEmail").textContent = email ? "Signed in as " + email : "";
+  document.getElementById("loginPanel").style.display = "none";
+  document.getElementById("passwordPanel").hidden = true;
+  document.querySelector(".header").style.display = "none";
+  document.querySelector(".layout").style.display = "none";
+}
+
 async function requestPasswordReset() {
   const emailInput = document.getElementById("loginEmail");
   const status = document.getElementById("loginStatus");
@@ -1416,6 +1445,7 @@ async function updateAuthUI() {
   resetDashboardMetrics();
   clearReview();
   document.getElementById("caseListStatus").textContent = "";
+  setNoAccessVisible(false);
   document.querySelector(".header").style.display = "none";
   document.querySelector(".layout").style.display = "none";
   document.getElementById("loginPanel").style.display = "block";
@@ -1448,7 +1478,12 @@ async function updateAuthUI() {
     const { data: membership, error: membershipError } = await supabaseClient
       .from("organization_members").select("organization_id").eq("user_id", user.id).single();
     if (request !== authRequest) return;
-    if (membershipError || !membership) throw membershipError || new Error("Hospital account not found.");
+    const noMembership = membershipError?.code === "PGRST116" || /0 rows|no rows|multiple \(or no\) rows/i.test(membershipError?.details || membershipError?.message || "");
+    if (membershipError && !noMembership) throw membershipError;
+    if (!membership || noMembership) {
+      setNoAccessVisible(true, user.email || "");
+      return;
+    }
     organizationId = membership.organization_id;
     renderWorkspaceView();
     updateControls();
@@ -1505,6 +1540,15 @@ document.getElementById("forgotPasswordBtn").addEventListener("click", requestPa
 document.getElementById("passwordSetupForm").addEventListener("submit", saveNewPassword);
 document.getElementById("passwordCancelBtn").addEventListener("click", leavePasswordFlow);
 document.getElementById("signOutBtn").addEventListener("click", async function() {
+  this.disabled = true;
+  try {
+    await supabaseClient.auth.signOut();
+  } finally {
+    this.disabled = false;
+  }
+});
+
+document.getElementById("noAccessSignOutBtn").addEventListener("click", async function() {
   this.disabled = true;
   try {
     await supabaseClient.auth.signOut();
@@ -1752,6 +1796,7 @@ supabaseClient.auth.onAuthStateChange(function(event, session) {
     document.getElementById("caseListStatus").textContent = "";
     const staffActionStatus = document.getElementById("staffActionStatus");
     if (staffActionStatus) staffActionStatus.textContent = "";
+    setNoAccessVisible(false);
     document.getElementById("loginPanel").style.display = "block";
     document.querySelector(".header").style.display = "none";
     document.querySelector(".layout").style.display = "none";
