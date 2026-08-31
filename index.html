@@ -585,18 +585,20 @@ let staffActionPending = false;
 let activeView = "dashboard";
 let editing = false;
 let currentAuthUserId = null;
-const WORKSPACE_STATE_KEY = "careflow.workspace.v1";
+const WORKSPACE_STATE_KEY = "careflow.workspace.v2";
+const LEGACY_WORKSPACE_STATE_KEY = "careflow.workspace.v1";
 
 function readWorkspaceState(userId) {
   try {
-    const raw = sessionStorage.getItem(WORKSPACE_STATE_KEY);
+    const raw = localStorage.getItem(WORKSPACE_STATE_KEY) || sessionStorage.getItem(LEGACY_WORKSPACE_STATE_KEY);
     if (!raw) return null;
     const state = JSON.parse(raw);
     if (!state || state.userId !== userId || !VIEW_CONFIG[state.view]) return null;
     return {
       view: state.view,
       caseId: state.caseId ?? null,
-      editorOpen: state.editorOpen === true
+      editorOpen: state.editorOpen === true,
+      scrollY: Number.isFinite(Number(state.scrollY)) ? Math.max(0, Number(state.scrollY)) : 0
     };
   } catch (_) {
     return null;
@@ -606,17 +608,22 @@ function readWorkspaceState(userId) {
 function persistWorkspaceState() {
   if (!currentAuthUserId) return;
   try {
-    sessionStorage.setItem(WORKSPACE_STATE_KEY, JSON.stringify({
+    localStorage.setItem(WORKSPACE_STATE_KEY, JSON.stringify({
       userId: currentAuthUserId,
       view: VIEW_CONFIG[activeView] ? activeView : "dashboard",
       caseId: currentCase?.id ?? null,
-      editorOpen: editing === true
+      editorOpen: editing === true,
+      scrollY: Math.max(0, Math.round(window.scrollY || 0))
     }));
+    sessionStorage.removeItem(LEGACY_WORKSPACE_STATE_KEY);
   } catch (_) { /* Workspace resume is best-effort only. */ }
 }
 
 function clearWorkspaceState() {
-  try { sessionStorage.removeItem(WORKSPACE_STATE_KEY); } catch (_) { /* Ignore storage errors. */ }
+  try {
+    localStorage.removeItem(WORKSPACE_STATE_KEY);
+    sessionStorage.removeItem(LEGACY_WORKSPACE_STATE_KEY);
+  } catch (_) { /* Ignore storage errors. */ }
 }
 
 const EDIT_FIELDS = { editPatientName: "patient_name", editDocumentType: "document_type", editDocumentDate: "document_date", editInsurance: "insurance_information", editMissingInfo: "missing_information", editReviewNotes: "review_notes" };
@@ -1459,6 +1466,11 @@ async function updateAuthUI() {
         editDetails();
       }
     }
+    if (restoreState?.scrollY) {
+      requestAnimationFrame(function() {
+        window.scrollTo({ top: restoreState.scrollY, left: 0, behavior: "auto" });
+      });
+    }
     persistWorkspaceState();
   } catch (error) {
     if (request === authRequest) {
@@ -1697,6 +1709,7 @@ window.addEventListener("beforeunload", function(event) {
   if (editing || saving) { event.preventDefault(); event.returnValue = ""; }
 });
 window.addEventListener("pagehide", persistWorkspaceState);
+window.addEventListener("blur", persistWorkspaceState);
 document.addEventListener("visibilitychange", function() {
   if (document.visibilityState === "hidden") persistWorkspaceState();
 });
