@@ -282,22 +282,39 @@
 </head>
 
 <body>
-  <div id="loginPanel" style="background:white; padding:25px; margin:25px; border:1px solid #e5e7eb; border-radius:12px;">
-  <h2 style="margin-bottom:15px;">Hospital Login</h2>
+  <div id="loginPanel" style="background:white; padding:25px; margin:25px; border:1px solid #e5e7eb; border-radius:12px; max-width:760px;">
+  <h2 style="margin-bottom:8px;">Hospital Login</h2>
+  <p style="color:#64748b; margin-bottom:16px;">Sign in with the hospital account provided by your CareFlow administrator.</p>
 
-  <input type="email" id="loginEmail" placeholder="Email address" style="padding:10px; margin-right:10px;">
+  <input type="email" id="loginEmail" autocomplete="email" placeholder="Email address" style="padding:10px; margin-right:10px; min-width:250px;">
 
-  <input type="password" id="loginPassword" placeholder="Password" style="padding:10px; margin-right:10px;">
+  <input type="password" id="loginPassword" autocomplete="current-password" placeholder="Password" style="padding:10px; margin-right:10px; min-width:220px;">
 
-  <button type="button" id="loginBtn" class="button">
-    Sign In
-  </button>
+  <button type="button" id="loginBtn" class="button">Sign In</button>
+  <button type="button" id="forgotPasswordBtn" class="button secondary" style="margin-left:8px;">Forgot password</button>
 
-  <p id="loginStatus" style="margin-top:12px;"></p>
+  <p id="loginStatus" role="status" style="margin-top:12px;"></p>
+</div>
+
+<div id="passwordPanel" hidden style="background:white; padding:25px; margin:25px; border:1px solid #e5e7eb; border-radius:12px; max-width:620px;">
+  <h2 id="passwordPanelTitle" style="margin-bottom:8px;">Set your CareFlow password</h2>
+  <p id="passwordPanelHelp" style="color:#64748b; margin-bottom:18px; line-height:1.5;"></p>
+  <form id="passwordSetupForm">
+    <input type="password" id="newPassword" autocomplete="new-password" placeholder="New password" minlength="12" required style="padding:10px; margin-right:10px; min-width:240px;">
+    <input type="password" id="confirmNewPassword" autocomplete="new-password" placeholder="Confirm new password" minlength="12" required style="padding:10px; margin-right:10px; min-width:240px;">
+    <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
+      <button type="submit" id="savePasswordBtn" class="button">Save password</button>
+      <button type="button" id="passwordCancelBtn" class="button secondary">Back to login</button>
+    </div>
+  </form>
+  <p id="passwordStatus" role="status" style="margin-top:12px;"></p>
 </div>
   <header class="header" style="display:none;">
     <div class="logo">CareFlow <span>AI</span></div>
-    <div class="user">Healthcare Administration</div>
+    <div class="user" style="display:flex; align-items:center; gap:12px;">
+      <span id="currentUserEmail">Healthcare Administration</span>
+      <button type="button" id="signOutBtn" class="button secondary" style="padding:8px 12px;">Sign Out</button>
+    </div>
   </header>
 
    <div class="layout" style="display:none;">
@@ -521,6 +538,10 @@ Request Correction
   <script>
 const SUPABASE_URL = "https://qyrxexraolqyymyozrtl.supabase.co";
 const SUPABASE_KEY = "sb_publishable_ucOmAjy6eXWdy-OPr9qCrQ_HkceYeN8";
+const CAREFLOW_APP_URL = "https://abdullahch2866-hub22.github.io/careflow-ai/";
+const careflowLocation = (typeof window !== "undefined" && window.location) ? window.location : { hash: "", search: "" };
+let recoveryFlowRequested = (careflowLocation.hash || "").includes("type=recovery") || new URLSearchParams(careflowLocation.search || "").get("type") === "recovery";
+let passwordFlowMode = null;
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const CASE_COLUMNS = "id, document_id, organization_id, file_name, document_type, status, created_at, patient_name, document_date, insurance_information, missing_information, review_notes, review_revision, review_confirmed, updated_at, updated_by";
 const CASE_LIST_LIMIT = 50;
@@ -1247,6 +1268,92 @@ async function openCase(caseId) {
   }
 }
 
+function setPasswordPanelVisible(visible, mode = "setup") {
+  const panel = document.getElementById("passwordPanel");
+  passwordFlowMode = visible ? mode : null;
+  panel.hidden = !visible;
+  if (!visible) return;
+  document.getElementById("loginPanel").style.display = "none";
+  document.querySelector(".header").style.display = "none";
+  document.querySelector(".layout").style.display = "none";
+  document.getElementById("passwordPanelTitle").textContent = mode === "recovery" ? "Set a new password" : "Finish your CareFlow account";
+  document.getElementById("passwordPanelHelp").textContent = mode === "recovery"
+    ? "Choose a new password for your CareFlow hospital account."
+    : "Your invitation is accepted. Choose your own password before opening the hospital workspace.";
+  document.getElementById("passwordStatus").textContent = "Use at least 12 characters and do not reuse a password from another account.";
+  document.getElementById("newPassword").value = "";
+  document.getElementById("confirmNewPassword").value = "";
+  setTimeout(function() { document.getElementById("newPassword").focus(); }, 0);
+}
+
+async function requestPasswordReset() {
+  const emailInput = document.getElementById("loginEmail");
+  const status = document.getElementById("loginStatus");
+  const button = document.getElementById("forgotPasswordBtn");
+  const email = emailInput.value.trim();
+  if (!email || !emailInput.checkValidity()) {
+    status.textContent = "Enter a valid email address above first.";
+    emailInput.focus();
+    return;
+  }
+  button.disabled = true;
+  status.textContent = "Sending password reset email...";
+  try {
+    const { error } = await supabaseClient.auth.resetPasswordForEmail(email, { redirectTo: CAREFLOW_APP_URL });
+    if (error) throw error;
+    status.textContent = "If this email belongs to a CareFlow account, a password reset link has been sent. Open the newest email once.";
+  } catch (error) {
+    status.textContent = "Could not send the reset email. " + (error.message || "Please try again.");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function saveNewPassword(event) {
+  event.preventDefault();
+  const password = document.getElementById("newPassword").value;
+  const confirmation = document.getElementById("confirmNewPassword").value;
+  const status = document.getElementById("passwordStatus");
+  const button = document.getElementById("savePasswordBtn");
+  if (password.length < 12) {
+    status.textContent = "Use at least 12 characters.";
+    return;
+  }
+  if (password !== confirmation) {
+    status.textContent = "The two passwords do not match.";
+    return;
+  }
+  button.disabled = true;
+  status.textContent = "Saving your password...";
+  try {
+    const { error } = await supabaseClient.auth.updateUser({
+      password,
+      data: { careflow_password_set: true }
+    });
+    if (error) throw error;
+    recoveryFlowRequested = false;
+    history.replaceState({}, document.title, CAREFLOW_APP_URL);
+    status.textContent = "Password saved successfully ✓";
+    document.getElementById("newPassword").value = "";
+    document.getElementById("confirmNewPassword").value = "";
+    setPasswordPanelVisible(false);
+    await updateAuthUI();
+  } catch (error) {
+    status.textContent = "Could not save the password. " + (error.message || "Please request a new reset link and try again.");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function leavePasswordFlow() {
+  recoveryFlowRequested = false;
+  history.replaceState({}, document.title, CAREFLOW_APP_URL);
+  await supabaseClient.auth.signOut();
+  setPasswordPanelVisible(false);
+  document.getElementById("loginPanel").style.display = "block";
+  document.getElementById("loginStatus").textContent = "Sign in or request a new password link.";
+}
+
 async function updateAuthUI() {
   const request = ++authRequest;
   organizationId = null;
@@ -1273,8 +1380,18 @@ async function updateAuthUI() {
   try {
     const { data: { user }, error } = await supabaseClient.auth.getUser();
     if (request !== authRequest) return;
-    if (!user) return;
+    if (!user) {
+      setPasswordPanelVisible(false);
+      return;
+    }
     if (error) throw error;
+    document.getElementById("currentUserEmail").textContent = user.email || "Signed in";
+    const invitedNeedsPassword = !!user.user_metadata?.careflow_invited_organization && user.user_metadata?.careflow_password_set !== true;
+    if (recoveryFlowRequested || invitedNeedsPassword) {
+      setPasswordPanelVisible(true, recoveryFlowRequested ? "recovery" : "invite");
+      return;
+    }
+    setPasswordPanelVisible(false);
     document.getElementById("loginPanel").style.display = "none";
     document.querySelector(".header").style.display = "flex";
     document.querySelector(".layout").style.display = "flex";
@@ -1310,6 +1427,18 @@ document.getElementById("loginBtn").addEventListener("click", async function() {
     await updateAuthUI();
   } catch (error) {
     loginStatus.textContent = "Login failed: " + (error.message || "Please try again.");
+  } finally {
+    this.disabled = false;
+  }
+});
+
+document.getElementById("forgotPasswordBtn").addEventListener("click", requestPasswordReset);
+document.getElementById("passwordSetupForm").addEventListener("submit", saveNewPassword);
+document.getElementById("passwordCancelBtn").addEventListener("click", leavePasswordFlow);
+document.getElementById("signOutBtn").addEventListener("click", async function() {
+  this.disabled = true;
+  try {
+    await supabaseClient.auth.signOut();
   } finally {
     this.disabled = false;
   }
@@ -1506,7 +1635,18 @@ document.getElementById("correctionForm").addEventListener("submit", saveCorrect
 document.getElementById("reviewConfirmed").addEventListener("change", updateControls);
 window.addEventListener("beforeunload", function(event) { if (editing || saving) { event.preventDefault(); event.returnValue = ""; } });
 supabaseClient.auth.onAuthStateChange(function(event) {
+  if (event === "PASSWORD_RECOVERY") {
+    recoveryFlowRequested = true;
+    setPasswordPanelVisible(true, "recovery");
+    return;
+  }
+  if (event === "SIGNED_IN") {
+    setTimeout(updateAuthUI, 0);
+    return;
+  }
   if (event === "SIGNED_OUT") {
+    recoveryFlowRequested = false;
+    setPasswordPanelVisible(false);
     authRequest += 1;
     listRequest += 1;
     dashboardRequest += 1;
