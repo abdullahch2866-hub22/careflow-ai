@@ -4,6 +4,7 @@ import fs from 'node:fs';
 
 const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const processor = fs.readFileSync(new URL('../supabase/functions/process-document/index.ts', import.meta.url), 'utf8');
+const processingSecurity = fs.readFileSync(new URL('../supabase/processing-attempts-security.sql', import.meta.url), 'utf8');
 
 test('case queries include persistent processing state', () => {
   for (const field of [
@@ -60,4 +61,14 @@ test('processor returns idempotent running and ready states', () => {
   assert.match(processor, /claim\.claim_state === "retry_limit"/);
   assert.match(processor, /processing_status: "failed"/);
   assert.match(processor, /retryable/);
+});
+
+test('processing attempt audit rows are private and indexed', () => {
+  assert.match(processingSecurity, /document_processing_attempts\s+enable row level security/i);
+  assert.match(processingSecurity, /revoke all on schema careflow_private[\s\S]*from public, anon, authenticated, service_role, authenticator/i);
+  assert.match(processingSecurity, /revoke all on table careflow_private\.document_processing_attempts/i);
+  assert.match(processingSecurity, /revoke all on sequence careflow_private\.document_processing_attempts_id_seq/i);
+  assert.match(processingSecurity, /document_processing_attempts_case_attempt_idx/);
+  assert.match(processingSecurity, /document_processing_attempts_document_id_idx/);
+  assert.match(processingSecurity, /document_processing_attempts_organization_id_idx/);
 });
