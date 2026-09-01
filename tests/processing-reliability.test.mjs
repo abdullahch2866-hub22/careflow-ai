@@ -21,6 +21,7 @@ test('frontend exposes safe processing states and recovery controls', () => {
   assert.match(html, /function processingIsStale\(/);
   assert.match(html, /PROCESSING_STALE_MS = 10 \* 60 \* 1000/);
   assert.match(html, /processing_attempts \?\? 0/);
+  assert.match(html, /Processing failed/);
 });
 
 test('review and approval are blocked until processing is ready', () => {
@@ -57,4 +58,6 @@ test('processor returns idempotent running and ready states', () => {
   assert.match(processor, /already_ready: true/);
   assert.match(processor, /already_processing: true/);
   assert.match(processor, /claim\.claim_state === "retry_limit"/);
+  assert.match(processor, /processing_status: "failed"/);
+  assert.match(processor, /retryable/);
 });
