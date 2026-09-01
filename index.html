@@ -296,8 +296,10 @@
   <input type="password" id="loginPassword" autocomplete="current-password" placeholder="Password" style="padding:10px; margin-right:10px; min-width:220px;">
 
   <button type="button" id="loginBtn" class="button">Sign In</button>
-  <button type="button" id="forgotPasswordBtn" class="button secondary" style="margin-left:8px;">Forgot password</button>
-  <button type="button" id="showSignupBtn" class="button secondary" style="margin-left:8px;">Create hospital workspace</button>
+  <div class="login-support-actions">
+    <button type="button" id="forgotPasswordBtn" class="button secondary">Forgot password</button>
+    <button type="button" id="showSignupBtn" class="button secondary">Create hospital workspace</button>
+  </div>
 
   <p id="loginStatus" role="status" style="margin-top:12px;"></p>
 </div>
@@ -364,17 +366,17 @@
     <aside class="sidebar">
       <h3>Workspace</h3>
 
-      <button type="button" id="navDashboard" class="nav-item active" data-view="dashboard" aria-current="page">Dashboard</button>
-      <button type="button" id="navDocuments" class="nav-item" data-view="documents">Documents</button>
-      <button type="button" id="navReview" class="nav-item" data-view="review">Review Queue</button>
-      <button type="button" id="navCompleted" class="nav-item" data-view="completed">Completed</button>
-      <button type="button" id="navActivity" class="nav-item" data-view="activity">Activity Log</button>
+      <button type="button" id="navDashboard" class="nav-item active" data-view="dashboard" aria-current="page"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-4H4v4Zm10 0h6v-9h-6v9Zm0-16v4h6V4h-6Z"/></svg><span>Dashboard</span></button>
+      <button type="button" id="navDocuments" class="nav-item" data-view="documents"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6V3Zm8 1v4h4M9 12h6M9 16h6"/></svg><span>Documents</span></button>
+      <button type="button" id="navReview" class="nav-item" data-view="review"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5H5v14h14v-4M9 12l2 2 8-8M14 5h5v5"/></svg><span>Review Queue</span></button>
+      <button type="button" id="navCompleted" class="nav-item" data-view="completed"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/></svg><span>Completed</span></button>
+      <button type="button" id="navActivity" class="nav-item" data-view="activity"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v5l3 2M4.9 5.5A9 9 0 1 1 3 12M3 5v5h5"/></svg><span>Activity Log</span></button>
 
       <br>
 
       <h3>Settings</h3>
-      <button type="button" id="navOrganization" class="nav-item" data-view="organization">Organization</button>
-      <button type="button" id="navUsers" class="nav-item" data-view="users">Users</button>
+      <button type="button" id="navOrganization" class="nav-item" data-view="organization"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V8l8-5 8 5v13M9 21v-6h6v6M8 10h.01M12 10h.01M16 10h.01"/></svg><span>Organization</span></button>
+      <button type="button" id="navUsers" class="nav-item" data-view="users"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6M17 14a5 5 0 0 1 4 5v1"/></svg><span>Users</span></button>
     </aside>
 
     <main class="main">
@@ -387,21 +389,25 @@
       <section class="cards" id="dashboardCards">
 
         <div class="card">
+          <div class="metric-icon documents-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l4 4v14H7V3Zm7 0v5h5M10 12h5M10 16h5"/></svg></div>
           <div class="card-title">Documents Today</div>
           <div class="card-number" id="metricDocumentsToday" aria-live="polite">—</div>
         </div>
 
         <div class="card">
+          <div class="metric-icon review-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4V5Zm4 4h8M8 13h5"/></svg></div>
           <div class="card-title">Awaiting Review</div>
           <div class="card-number" id="metricAwaitingReview" aria-live="polite">—</div>
         </div>
 
         <div class="card">
+          <div class="metric-icon completed-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/></svg></div>
           <div class="card-title">Completed</div>
           <div class="card-number" id="metricCompleted" aria-live="polite">—</div>
         </div>
 
         <div class="card" title="Estimated at 15 minutes saved per completed case.">
+          <div class="metric-icon time-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M9 2h6"/></svg></div>
           <div class="card-title">Estimated Time Saved</div>
           <div class="card-number" id="metricTimeSaved" aria-live="polite">—</div>
         </div>
@@ -493,6 +499,8 @@
         <div id="reviewFileName" class="case-type" style="margin-top:8px;"></div>
     </div>
 
+    <div class="review-summary-grid">
+
     <div class="case">
       <div>
         <div class="case-name">AI Processing</div>
@@ -547,7 +555,8 @@
     <div class="case">
       <div><div class="case-name">Latest correction note</div><div id="reviewNotes" class="case-type">No corrections recorded.</div></div>
     </div>
-    <div style="padding:20px; display:flex; gap:12px; flex-wrap:wrap;">
+    </div>
+    <div class="review-toolbar">
       <button type="button" id="viewSourceBtn" class="button secondary" disabled>View Source PDF</button>
       <button type="button" id="retryProcessingBtn" class="button secondary" hidden>Retry Processing</button>
       <button type="button" id="editDetailsBtn" class="button" disabled>Edit Details</button>
@@ -568,7 +577,7 @@
       <label class="review-check"><input id="correctionsConfirmed" type="checkbox" required>I checked these corrections against the source or supplied information.</label>
       <div class="review-actions"><button id="saveDetailsBtn" class="button" type="submit">Save Corrections</button><button id="cancelEditBtn" class="button secondary" type="button">Cancel</button></div>
     </form>
-    <div style="padding:0 20px;">
+    <div class="approval-panel" style="padding:0 20px;">
       <p id="approvalGuidance" class="review-help"></p>
       <label class="review-check"><input id="reviewConfirmed" type="checkbox" disabled>I checked the saved details and correction notes and confirm they are ready for approval.</label>
     </div>
@@ -1328,7 +1337,12 @@ function renderCases() {
   visibleCases.forEach(function(caseRow) {
     const row = document.createElement("div");
     row.className = "case";
+    const documentIcon = document.createElement("div");
+    documentIcon.className = "case-document-icon";
+    documentIcon.setAttribute("aria-hidden", "true");
+    documentIcon.textContent = "PDF";
     const details = document.createElement("div");
+    details.className = "case-details";
     const name = document.createElement("div");
     name.className = "case-name";
     name.textContent = caseRow.file_name || "Untitled document";
@@ -1336,6 +1350,9 @@ function renderCases() {
     type.className = "case-type";
     type.textContent = (caseRow.document_type || "Healthcare document") + " · Case #" + caseRow.id;
     details.append(name, type);
+    const caseMain = document.createElement("div");
+    caseMain.className = "case-main";
+    caseMain.append(documentIcon, details);
     const actions = document.createElement("div");
     actions.className = "case-actions";
     const badge = document.createElement("span");
@@ -1363,7 +1380,7 @@ function renderCases() {
     review.setAttribute("aria-label", "Review case " + caseRow.id + ": " + (caseRow.file_name || "Untitled document"));
     review.addEventListener("click", function() { openCase(caseRow.id); });
     actions.append(badge, review);
-    row.append(details, actions);
+    row.append(caseMain, actions);
     container.append(row);
   });
   updateControls();
