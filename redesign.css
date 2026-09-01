@@ -223,3 +223,75 @@ body{background:linear-gradient(135deg,#f8faf9 0%,#f1f6f5 55%,#f7f8f6 100%)}
  .signup-actions{display:grid!important;grid-template-columns:1fr!important}
  .signup-actions .button{width:100%}
 }
+
+/* Password, invitation and access-state screens */
+#passwordPanel{display:grid;grid-template-columns:minmax(460px,1fr) minmax(520px,.9fr);min-height:100vh;padding:0!important;background:#f8faf9!important}
+#passwordPanel:before{display:none!important}
+#passwordPanel>.auth-brand-panel,#passwordPanel>.auth-form-stage{position:relative;z-index:1;width:auto!important;margin:0!important}
+.password-form-card{width:min(100%,520px)}
+.password-form-card h2{font-size:32px!important}
+.password-form-card input{display:block;width:100%;min-width:0;margin:0 0 17px!important;padding:13px 14px!important;background:#fbfdfd}
+.password-actions{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap}
+.password-actions .button{min-height:44px}
+#passwordStatus{min-height:19px;margin-top:12px!important;color:#5d727d;font-size:12px;line-height:1.55}
+#noAccessPanel{display:grid;min-height:100vh;padding:28px!important;place-items:center;background:radial-gradient(circle at 20% 10%,rgba(38,180,162,.09),transparent 30%),#f4f8f7!important}
+#noAccessPanel:before{display:none!important}
+#noAccessPanel>.access-message-card{position:relative;width:min(100%,560px)!important;margin:0!important;padding:42px;border:1px solid #d9e5e3;border-radius:22px;background:#fff;box-shadow:0 24px 70px rgba(7,36,52,.09);text-align:center}
+.access-message-icon{display:grid;width:54px;height:54px;margin:0 auto 20px;place-items:center;border-radius:50%;background:#fff0df;color:#a96511;font-size:24px;font-weight:800}
+.access-message-card h2{margin:10px 0!important;font-size:29px!important;letter-spacing:-.035em}
+.access-message-card>p{margin:0 auto 10px!important;color:#617681!important;font-size:14px;line-height:1.7}
+#noAccessEmail{padding:10px 13px;border-radius:9px;background:#f3f7f6;color:#284656!important;font-weight:700}
+.access-message-card .button{margin-top:10px}
+
+/* Final workspace polish */
+.section-heading{display:flex;align-items:center;gap:13px}
+.section-heading-icon{display:grid;width:38px;height:38px;place-items:center;border-radius:50%;background:linear-gradient(135deg,#e5f6f2,#d6efeb);color:#08786f;font-size:18px;font-weight:800}
+.section-heading small{display:block;margin-top:2px;color:#7b8c94;font-size:10px;font-weight:600;letter-spacing:.025em}
+#activityLogStatus:not(:empty),#organizationStatus:not(:empty),#usersStatus:not(:empty),#staffActionStatus:not(:empty),#caseListStatus:not(:empty),#uploadStatus:not(:empty),#reviewActionStatus:not(:empty){margin:0 22px 16px!important;padding:10px 13px!important;border:1px solid #d9e8e6;border-radius:10px;background:#f3f9f8;color:#496570!important;font-size:12px;line-height:1.5}
+.empty-state{min-height:150px;padding:45px 24px!important;text-align:center;color:#73858e}
+.empty-state:before{content:"";display:block;width:38px;height:3px;margin:0 auto 17px;border-radius:999px;background:linear-gradient(90deg,#56cabc,#a6ded7)}
+#activityLogList{position:relative;padding:8px 22px 22px}
+#activityLogList:before{content:"";position:absolute;left:39px;top:18px;bottom:30px;width:1px;background:#dce8e6}
+.activity-entry{position:relative;margin-left:32px;padding:16px 18px;border:1px solid #e0e9e8!important;border-radius:12px;background:#fbfdfd}
+.activity-entry+.activity-entry{margin-top:10px}
+.activity-entry:before{content:"";position:absolute;left:-27px;top:22px;width:9px;height:9px;border:4px solid #f5f8f7;border-radius:50%;background:#17a394;box-shadow:0 0 0 1px #a4d7d1}
+.activity-title{color:#203d4e;font-size:13px}.activity-meta{margin-top:5px;line-height:1.6}
+.settings-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.settings-card{position:relative;min-height:130px;padding:22px;overflow:hidden;background:linear-gradient(145deg,#fff,#f7faf9)}
+.settings-card:after{content:"";position:absolute;inset:auto 0 0;height:3px;background:var(--settings-accent,#159b8e)}
+.settings-card:nth-child(1){--settings-accent:#3972b8}.settings-card:nth-child(2){--settings-accent:#6d60ad}.settings-card:nth-child(3){--settings-accent:#0f9a7f}.settings-card:nth-child(4){--settings-accent:#c27a18}
+.settings-label{margin-bottom:16px}.settings-value{font-size:18px;line-height:1.35}
+#organizationSection>.review-help,#usersSection>.review-help{margin:0 22px 22px;padding:13px 15px!important;border-left:3px solid #89cfc6;border-radius:0 9px 9px 0;background:#f4f9f8}
+.staff-admin-panel{margin:0 22px 20px;padding:22px;border:1px solid #dce8e6!important;border-radius:14px;background:linear-gradient(120deg,#f7fbfa,#edf7f5)}
+.staff-admin-panel h3{font-size:17px;letter-spacing:-.02em}
+.staff-invite-form{grid-template-columns:minmax(220px,1fr) 150px auto}
+#usersList{display:grid;gap:10px;padding:0 22px 22px}
+.member-row{padding:17px 18px!important;border:1px solid #e0e9e8!important;border-radius:12px;background:#fff;box-shadow:0 5px 16px rgba(7,40,56,.025)}
+.member-email{color:#203c4e;font-size:13px}.member-meta{margin-top:5px}
+.current-user-badge,.account-badge{display:inline-flex;padding:3px 7px;border-radius:999px;background:#e4f5ef;color:#11705b}
+.account-badge{background:#eef2f3;color:#62737c}
+.member-actions select{min-width:110px;padding:8px 10px!important}
+.role-badge{text-transform:capitalize}
+.review-form{border-color:#dce8e6}
+.review-form h3{font-size:19px;letter-spacing:-.025em}
+.review-field input,.review-field textarea{background:#fff}
+#sourceViewerModal>div{border:1px solid rgba(255,255,255,.18)}
+@media(max-width:1100px){.settings-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:900px){
+ #passwordPanel{grid-template-columns:1fr;grid-template-rows:155px auto;min-height:100vh;padding:0!important}
+ .password-form-stage{place-items:start center;padding:22px 16px 46px}
+ .password-form-card{padding:27px 22px}
+ .password-form-card h2{font-size:28px!important}
+ #noAccessPanel>.access-message-card{padding:32px 22px}
+ .staff-invite-form{grid-template-columns:1fr}
+}
+@media(max-width:650px){
+ .settings-grid{grid-template-columns:1fr;padding:16px}
+ .settings-card{min-height:105px}
+ #activityLogList,#usersList{padding-inline:14px}
+ #activityLogList:before{left:31px}
+ .member-row{align-items:stretch}
+ .member-actions{width:100%}
+ .member-actions>*{flex:1}
+ .password-actions{display:grid}.password-actions .button{width:100%}
+}

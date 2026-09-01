@@ -375,25 +375,49 @@
 </div>
 
 <div id="passwordPanel" hidden style="background:white; padding:25px; margin:25px; border:1px solid #e5e7eb; border-radius:12px; max-width:620px;">
-  <h2 id="passwordPanelTitle" style="margin-bottom:8px;">Set your CareFlow password</h2>
-  <p id="passwordPanelHelp" style="color:#64748b; margin-bottom:18px; line-height:1.5;"></p>
-  <form id="passwordSetupForm">
-    <input type="password" id="newPassword" autocomplete="new-password" placeholder="New password" minlength="15" required style="padding:10px; margin-right:10px; min-width:240px;">
-    <input type="password" id="confirmNewPassword" autocomplete="new-password" placeholder="Confirm new password" minlength="15" required style="padding:10px; margin-right:10px; min-width:240px;">
-    <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
-      <button type="submit" id="savePasswordBtn" class="button">Save password</button>
-      <button type="button" id="passwordCancelBtn" class="button secondary">Back to login</button>
+  <section class="auth-brand-panel" aria-label="CareFlow AI">
+    <div class="auth-brand-logo"><span class="auth-brand-symbol">✦</span>CareFlow <strong>AI</strong></div>
+    <div class="auth-brand-message">
+      <div class="auth-kicker">Protected account access</div>
+      <h1>Secure your hospital workspace.</h1>
+      <p>Use a strong, unique password to protect access to your organization’s document workflows.</p>
+      <div class="auth-trust-list">
+        <span><b>✓</b> 15-character minimum</span>
+        <span><b>✓</b> Protected recovery flow</span>
+      </div>
     </div>
-  </form>
-  <p id="passwordStatus" role="status" style="margin-top:12px;"></p>
+    <p class="auth-brand-footnote">CareFlow AI · Secure operational workspace</p>
+  </section>
+  <section class="auth-form-stage password-form-stage">
+    <div class="auth-form-card password-form-card">
+      <div class="auth-form-kicker">Account security</div>
+      <h2 id="passwordPanelTitle">Set your CareFlow password</h2>
+      <p id="passwordPanelHelp" class="auth-form-intro"></p>
+      <form id="passwordSetupForm">
+        <label class="auth-input-label" for="newPassword">New password</label>
+        <input type="password" id="newPassword" autocomplete="new-password" placeholder="Create a strong password" minlength="15" required>
+        <label class="auth-input-label" for="confirmNewPassword">Confirm new password</label>
+        <input type="password" id="confirmNewPassword" autocomplete="new-password" placeholder="Confirm your password" minlength="15" required>
+        <div class="password-actions">
+          <button type="submit" id="savePasswordBtn" class="button">Save password <span aria-hidden="true">→</span></button>
+          <button type="button" id="passwordCancelBtn" class="button secondary">Back to login</button>
+        </div>
+      </form>
+      <p id="passwordStatus" role="status"></p>
+      <div class="auth-security-note"><span aria-hidden="true">◇</span> Never reuse a password from another account</div>
+    </div>
+  </section>
 </div>
 
 <div id="noAccessPanel" hidden style="background:white; padding:32px; margin:25px; border:1px solid #e5e7eb; border-radius:14px; max-width:720px;">
-  <div style="font-size:14px; font-weight:700; color:#2563eb; margin-bottom:10px;">CareFlow AI</div>
-  <h2 style="margin-bottom:10px;">No hospital workspace access</h2>
-  <p style="color:#475569; line-height:1.6; margin-bottom:8px;">You no longer have access to a CareFlow hospital workspace. Contact your hospital administrator if you believe this is a mistake.</p>
-  <p id="noAccessEmail" style="color:#64748b; margin-bottom:20px;"></p>
-  <button type="button" id="noAccessSignOutBtn" class="button secondary">Sign Out</button>
+  <section class="access-message-card">
+    <div class="access-message-icon" aria-hidden="true">!</div>
+    <div class="auth-form-kicker">Workspace access</div>
+    <h2>No hospital workspace access</h2>
+    <p>You no longer have access to a CareFlow hospital workspace. Contact your hospital administrator if you believe this is a mistake.</p>
+    <p id="noAccessEmail"></p>
+    <button type="button" id="noAccessSignOutBtn" class="button secondary">Sign Out</button>
+  </section>
 </div>
 
   <header class="header" style="display:none;">
@@ -489,7 +513,7 @@
 
       <section id="activityLogSection" class="recent" hidden>
         <div class="recent-header case-list-header">
-          <span>Activity Log</span>
+          <span class="section-heading"><span class="section-heading-icon" aria-hidden="true">↻</span><span>Activity Log<small>Protected review history</small></span></span>
           <button type="button" id="reloadActivityBtn" class="button" disabled>Reload activity</button>
         </div>
         <p id="activityLogStatus" role="status" style="padding:12px 20px;"></p>
@@ -498,7 +522,7 @@
 
       <section id="organizationSection" class="recent" hidden>
         <div class="recent-header case-list-header">
-          <span>Organization</span>
+          <span class="section-heading"><span class="section-heading-icon" aria-hidden="true">⌂</span><span>Organization<small>Workspace information</small></span></span>
           <button type="button" id="reloadOrganizationBtn" class="button" disabled>Reload organization</button>
         </div>
         <p id="organizationStatus" role="status" style="padding:12px 20px;"></p>
@@ -513,7 +537,7 @@
 
       <section id="usersSection" class="recent" hidden>
         <div class="recent-header case-list-header">
-          <span>Users</span>
+          <span class="section-heading"><span class="section-heading-icon" aria-hidden="true">♙</span><span>Users<small>Hospital access and roles</small></span></span>
           <button type="button" id="reloadUsersBtn" class="button" disabled>Reload users</button>
         </div>
         <p id="usersStatus" role="status" style="padding:12px 20px;"></p>
