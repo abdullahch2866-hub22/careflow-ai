@@ -1958,8 +1958,16 @@ document.getElementById("documentInput").addEventListener("change", async functi
     if (requestedAuth !== authRequest || requestedOrganization !== organizationId) return;
     clearReview();
     uploadStatus.textContent = "Uploading: " + file.name + "...";
-    // Keep patient names and arbitrary filename characters out of Storage paths.
-    const filePath = requestedOrganization + "/" + crypto.randomUUID() + ".pdf";
+    // The server reserves a one-time path and enforces hospital/user quotas
+    // before Storage accepts any bytes.
+    const { data: reservationData, error: reservationError } = await supabaseClient
+      .rpc("careflow_reserve_document_upload");
+    if (reservationError) throw new Error(reservationError.message || "Upload limit check failed.");
+    const reservation = Array.isArray(reservationData) ? reservationData[0] : reservationData;
+    const filePath = reservation?.storage_path;
+    if (typeof filePath !== "string" || !filePath.startsWith(requestedOrganization + "/")) {
+      throw new Error("A secure upload path could not be reserved. Please try again.");
+    }
     const { error: storageError } = await supabaseClient.storage.from("documents").upload(filePath, file, {
       contentType: "application/pdf", upsert: false
     });

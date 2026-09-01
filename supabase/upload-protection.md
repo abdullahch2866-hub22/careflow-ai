@@ -47,9 +47,19 @@ someone who bypasses the website can still submit other files directly to
 Storage under the existing access policies and platform-wide limits. The
 processor's checks still prevent those files from being sent for AI processing.
 
-Bucket MIME and size settings are not malware scanning. Retention, quotas,
-request-rate limits, file scanning, robust PDF parsing, and account security
-remain separate production work. Use fictional patient information only.
+Bucket MIME and size settings are not malware scanning. Retention, file
+scanning, robust PDF parsing, and account security remain separate production
+work. Use fictional patient information only.
+
+## Server-side abuse limits
+
+Uploads now require a one-time, 15-minute server reservation before Storage
+accepts any bytes. The beta limits are 20 reservations per user per hour and
+100 per hospital per day. AI processing is limited to 10 attempts per user per
+hour, 100 per hospital per day, three simultaneous hospital jobs, and five
+attempts for one case. All quota decisions are serialized in Postgres so
+parallel requests cannot bypass them. These limits are enforced on the server,
+not only in the website.
 
 ## Validation
 

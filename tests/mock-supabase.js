@@ -85,6 +85,11 @@ window.supabase = { createClient() { return {
     onAuthStateChange(callback) { fixtureAuthCallback = callback; return { data: { subscription: { unsubscribe() {} } } }; }
   },
   from: fixtureQuery,
+  async rpc(name) {
+    recordFixtureQuery("rpc " + name);
+    if (name !== "careflow_reserve_document_upload") return { data: null, error: { message: "Fixture: unexpected RPC" } };
+    return { data: { storage_path: fixtureOrg + "/11111111-1111-4111-8111-111111111111.pdf", expires_at: "2026-09-01T00:15:00Z" }, error: null };
+  },
   storage: { from() { return { async upload(path, file, options) { recordFixtureQuery("storage upload " + JSON.stringify([path,options])); return { data: {}, error: null }; } }; } },
   functions: { async invoke(name, options = {}) {
     if (name === "view-document") {
