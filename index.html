@@ -288,20 +288,43 @@
 
 <body>
   <div id="loginPanel" style="background:white; padding:25px; margin:25px; border:1px solid #e5e7eb; border-radius:12px; max-width:760px;">
-  <h2 style="margin-bottom:8px;">Hospital Login</h2>
-  <p style="color:#64748b; margin-bottom:16px;">Sign in with the hospital account provided by your CareFlow administrator.</p>
+  <section class="auth-brand-panel" aria-label="CareFlow AI">
+    <div class="auth-brand-logo"><span class="auth-brand-symbol">✦</span>CareFlow <strong>AI</strong></div>
+    <div class="auth-brand-message">
+      <div class="auth-kicker">Healthcare document intelligence</div>
+      <h1>Administrative clarity for every patient document.</h1>
+      <p>Turn incoming healthcare PDFs into structured, review-ready workflows—with human oversight at every decision.</p>
+      <div class="auth-trust-list">
+        <span><b>✓</b> Hospital-isolated workspace</span>
+        <span><b>✓</b> AI-assisted extraction</span>
+        <span><b>✓</b> Human-controlled approval</span>
+      </div>
+    </div>
+    <p class="auth-brand-footnote">CareFlow AI · Secure operational workspace</p>
+  </section>
+  <section class="auth-form-stage">
+    <div class="auth-form-card">
+      <div class="auth-mobile-logo"><span>✦</span> CareFlow AI</div>
+      <div class="auth-form-kicker">Hospital workspace</div>
+      <h2>Welcome back</h2>
+      <p class="auth-form-intro">Sign in with the account provided by your CareFlow administrator.</p>
 
-  <input type="email" id="loginEmail" autocomplete="email" placeholder="Email address" style="padding:10px; margin-right:10px; min-width:250px;">
+      <label class="auth-input-label" for="loginEmail">Email address</label>
+      <input type="email" id="loginEmail" autocomplete="email" placeholder="name@hospital.com">
 
-  <input type="password" id="loginPassword" autocomplete="current-password" placeholder="Password" style="padding:10px; margin-right:10px; min-width:220px;">
+      <label class="auth-input-label" for="loginPassword">Password</label>
+      <input type="password" id="loginPassword" autocomplete="current-password" placeholder="Enter your password">
 
-  <button type="button" id="loginBtn" class="button">Sign In</button>
-  <div class="login-support-actions">
-    <button type="button" id="forgotPasswordBtn" class="button secondary">Forgot password</button>
-    <button type="button" id="showSignupBtn" class="button secondary">Create hospital workspace</button>
-  </div>
+      <button type="button" id="loginBtn" class="button">Sign In <span aria-hidden="true">→</span></button>
+      <div class="login-support-actions">
+        <button type="button" id="forgotPasswordBtn" class="button secondary">Forgot password?</button>
+        <button type="button" id="showSignupBtn" class="button secondary">Create a workspace</button>
+      </div>
 
-  <p id="loginStatus" role="status" style="margin-top:12px;"></p>
+      <p id="loginStatus" role="status"></p>
+      <div class="auth-security-note"><span aria-hidden="true">◇</span> Protected hospital access</div>
+    </div>
+  </section>
 </div>
 
 <div id="signupPanel" hidden style="background:white; padding:25px; margin:25px; border:1px solid #e5e7eb; border-radius:12px; max-width:760px;">
@@ -1728,7 +1751,7 @@ async function leavePasswordFlow() {
   history.replaceState({}, document.title, CAREFLOW_APP_URL);
   await supabaseClient.auth.signOut();
   setPasswordPanelVisible(false);
-  document.getElementById("loginPanel").style.display = "block";
+  document.getElementById("loginPanel").style.display = "grid";
   document.getElementById("loginStatus").textContent = "Sign in or request a new password link.";
 }
 
@@ -1754,7 +1777,7 @@ async function updateAuthUI() {
   setNoAccessVisible(false);
   document.querySelector(".header").style.display = "none";
   document.querySelector(".layout").style.display = "none";
-  document.getElementById("loginPanel").style.display = "block";
+  document.getElementById("loginPanel").style.display = "grid";
   try {
     const { data: { user }, error } = await supabaseClient.auth.getUser();
     if (request !== authRequest) return;
@@ -1867,7 +1890,7 @@ document.getElementById("showSignupBtn").addEventListener("click", function() { 
 document.getElementById("signupForm").addEventListener("submit", createHospitalAccount);
 document.getElementById("signupCancelBtn").addEventListener("click", function() {
   setSignupPanelVisible(false);
-  document.getElementById("loginPanel").style.display = "block";
+  document.getElementById("loginPanel").style.display = "grid";
 });
 document.getElementById("passwordSetupForm").addEventListener("submit", saveNewPassword);
 document.getElementById("passwordCancelBtn").addEventListener("click", leavePasswordFlow);
@@ -2187,7 +2210,7 @@ supabaseClient.auth.onAuthStateChange(function(event, session) {
     const staffActionStatus = document.getElementById("staffActionStatus");
     if (staffActionStatus) staffActionStatus.textContent = "";
     setNoAccessVisible(false);
-    document.getElementById("loginPanel").style.display = "block";
+    document.getElementById("loginPanel").style.display = "grid";
     document.querySelector(".header").style.display = "none";
     document.querySelector(".layout").style.display = "none";
   }
