@@ -12,7 +12,7 @@ const executable = stripTypeScriptTypes(source.replace(/^import .*;\s*$/gm, ''),
 
 const organization = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa';
 const otherOrganization = 'bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb';
-const documentId = 'cccccccc-cccc-4ccc-cccc-cccccccccccc';
+const documentId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const userId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const runId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const syntheticPdf = '%PDF-1.7\n% Fictional test fixture only\n%%EOF\n';

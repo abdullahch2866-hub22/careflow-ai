@@ -62,8 +62,10 @@ function makeDocument() {
     createElement: tag => new Element(tag),
     querySelector: selector => ({ '.header': header, '.layout': layout })[selector] || null,
     querySelectorAll: selector => {
-      assert.equal(selector, '.review-btn');
-      return all(body).filter(element => element.className.split(' ').includes('review-btn'));
+      const allowed = new Set(['.review-btn', '.retry-processing-btn', '.review-btn, .retry-processing-btn']);
+      assert.ok(allowed.has(selector), 'Unexpected selector: ' + selector);
+      const classes = selector.split(',').map(value => value.trim().replace(/^\./, ''));
+      return all(body).filter(element => classes.some(name => element.className.split(' ').includes(name)));
     },
     addEventListener() { /* Fixture controls are not needed for these non-browser tests. */ }
   };

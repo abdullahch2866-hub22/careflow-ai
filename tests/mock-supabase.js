@@ -5,7 +5,18 @@ let fixtureCases = JSON.parse(sessionStorage.getItem("careflow-fixture-cases") |
   { id: 7, document_id: "fixture-document-7", organization_id: fixtureOrg, file_name: "<img src=x onerror=alert(1)>.pdf", document_type: "Healthcare document", status: "Review", created_at: "2026-08-26T00:00:00Z", patient_name: "Sample Patient B", document_date: "2026-08-12", insurance_information: "Sample insurer B", missing_information: null },
   { id: 6, document_id: "fixture-document-6", organization_id: "fixture-hospital-b", file_name: "OTHER_HOSPITAL_PRIVATE.pdf", status: "Review", created_at: "2026-08-20T00:00:00Z" }
 ];
-fixtureCases.forEach(row => { row.review_revision ??= 1; row.review_confirmed ??= false; row.review_notes ??= null; });
+fixtureCases.forEach(row => {
+  row.review_revision ??= 1;
+  row.review_confirmed ??= false;
+  row.review_notes ??= null;
+  row.processing_status ??= 'ready';
+  row.processing_attempts ??= 1;
+  row.processing_error_code ??= null;
+  row.processing_error_message ??= null;
+  row.processing_started_at ??= null;
+  row.processing_completed_at ??= row.created_at || null;
+  row.processing_retryable ??= false;
+});
 let fixtureFailSave = false;
 let fixtureFailList = false;
 let fixtureEmpty = false;
@@ -36,7 +47,7 @@ function fixtureQuery(table) {
         if (table === "documents" && action === "insert") return resolve({ data: { id: "fixture-document-new" }, error: null });
         if (table !== "cases") throw new Error("Unexpected fixture table");
         if (action === "insert") {
-          fixtureCases.push({ ...payload[0], id: 9, created_at: "2026-09-01T00:00:00Z", review_revision: 0, review_confirmed: false, review_notes: null });
+          fixtureCases.push({ ...payload[0], id: 9, created_at: "2026-09-01T00:00:00Z", review_revision: 0, review_confirmed: false, review_notes: null, processing_status: 'pending', processing_attempts: 0, processing_error_code: null, processing_error_message: null, processing_started_at: null, processing_completed_at: null, processing_retryable: true });
           storeFixtureCases();
           return resolve({ data: null, error: null });
         }
@@ -84,11 +95,18 @@ window.supabase = { createClient() { return {
       if (!row) return { data: null, error: { message: "Fixture: source access denied" } };
       return { data: { success: true, signed_url: "https://fixture.invalid/secure-source.pdf?token=temporary", expires_in: 300, file_name: row.file_name }, error: null };
     }
-    recordFixtureQuery("invoke process-document");
+    const documentId = options?.body?.document_id;
+    recordFixtureQuery("invoke process-document " + documentId);
+    const row = fixtureCases.find(item => item.document_id === documentId && item.organization_id === fixtureOrg);
+    if (!row) return { data: null, error: { message: "Fixture: processing access denied" } };
+    if (row.processing_status === 'ready') return { data: { success: true, processing_status: 'ready', already_ready: true }, error: null };
+    row.processing_status = 'processing';
+    row.processing_attempts = (row.processing_attempts || 0) + 1;
+    row.processing_started_at = '2026-09-01T00:00:01Z';
     const extracted = { patient_name: "Uploaded Sample Patient", document_date: "2026-08-31", insurance_information: "Uploaded sample insurer", missing_information: "Sample missing contact" };
-    Object.assign(fixtureCases.find(row => row.id === 9), extracted, { review_revision: 1 });
+    Object.assign(row, extracted, { review_revision: 1, processing_status: 'ready', processing_error_code: null, processing_error_message: null, processing_completed_at: '2026-09-01T00:00:02Z', processing_retryable: false });
     storeFixtureCases();
-    return { data: { success: true, extracted }, error: null };
+    return { data: { success: true, processing_status: 'ready', attempt_number: row.processing_attempts, extracted }, error: null };
   } }
 }; } };
 
