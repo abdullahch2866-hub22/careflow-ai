@@ -239,6 +239,10 @@
     button:focus-visible { outline: 3px solid #2563eb; outline-offset: 3px; }
     .status[data-status="Review"] { background: #dbeafe; color: #1e40af; }
     .status[data-status="Correction Required"] { background: #fef3c7; color: #92400e; }
+    .status[data-status="Processing"] { background: #e0f2fe; color: #075985; }
+    .status[data-status="Waiting to process"] { background: #f1f5f9; color: #475569; }
+    .status[data-status="Processing failed"] { background: #fee2e2; color: #991b1b; }
+    .status[data-status="Ready"] { background: #dcfce7; color: #166534; }
     #caseListStatus:empty, #dashboardMetricsStatus:empty { display: none; }
     [hidden] { display: none !important; }
     .review-form { padding: 24px 20px; background: #f8fafc; border-block: 1px solid #dbe3ee; }
@@ -488,6 +492,14 @@
         <div id="reviewFileName" class="case-type" style="margin-top:8px;"></div>
     </div>
 
+    <div class="case">
+      <div>
+        <div class="case-name">AI Processing</div>
+        <div id="reviewProcessingText" class="case-type">—</div>
+      </div>
+      <div id="reviewProcessingBadge" class="status" data-status="Waiting to process">Waiting to process</div>
+    </div>
+
    <div class="case">
   <div>
     <div class="case-name">Patient Name</div>
@@ -536,6 +548,7 @@
     </div>
     <div style="padding:20px; display:flex; gap:12px; flex-wrap:wrap;">
       <button type="button" id="viewSourceBtn" class="button secondary" disabled>View Source PDF</button>
+      <button type="button" id="retryProcessingBtn" class="button secondary" hidden>Retry Processing</button>
       <button type="button" id="editDetailsBtn" class="button" disabled>Edit Details</button>
     </div>
     <form id="correctionForm" class="review-form" hidden autocomplete="off">
@@ -595,7 +608,7 @@ const careflowLocation = (typeof window !== "undefined" && window.location) ? wi
 let recoveryFlowRequested = (careflowLocation.hash || "").includes("type=recovery") || new URLSearchParams(careflowLocation.search || "").get("type") === "recovery";
 let passwordFlowMode = null;
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const CASE_COLUMNS = "id, document_id, organization_id, file_name, document_type, status, created_at, patient_name, document_date, insurance_information, missing_information, review_notes, review_revision, review_confirmed, updated_at, updated_by";
+const CASE_COLUMNS = "id, document_id, organization_id, file_name, document_type, status, created_at, patient_name, document_date, insurance_information, missing_information, review_notes, review_revision, review_confirmed, updated_at, updated_by, processing_status, processing_error_code, processing_error_message, processing_attempts, processing_started_at, processing_completed_at, processing_retryable";
 const CASE_LIST_LIMIT = 50;
 const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
 const ESTIMATED_MINUTES_SAVED_PER_COMPLETED_CASE = 15;
@@ -638,7 +651,9 @@ let activeView = "dashboard";
 let editing = false;
 let sourceViewerLoading = false;
 let sourceViewerRequest = 0;
+let processingRequestPending = false;
 let currentAuthUserId = null;
+const PROCESSING_STALE_MS = 10 * 60 * 1000;
 const WORKSPACE_STATE_KEY = "careflow.workspace.v2";
 const LEGACY_WORKSPACE_STATE_KEY = "careflow.workspace.v1";
 
@@ -682,8 +697,49 @@ function clearWorkspaceState() {
 
 const EDIT_FIELDS = { editPatientName: "patient_name", editDocumentType: "document_type", editDocumentDate: "document_date", editInsurance: "insurance_information", editMissingInfo: "missing_information", editReviewNotes: "review_notes" };
 
+function processingIsStale(row) {
+  if (row?.processing_status !== "processing" || !row.processing_started_at) return false;
+  const started = new Date(row.processing_started_at).getTime();
+  return Number.isFinite(started) && Date.now() - started >= PROCESSING_STALE_MS;
+}
+
+function canRetryProcessing(row) {
+  const attempts = Number(row?.processing_attempts ?? 0);
+  if (!row?.document_id || row.processing_retryable === false || attempts >= 5) return false;
+  return row.processing_status === "pending" ||
+    row.processing_status === "failed" ||
+    processingIsStale(row);
+}
+
+function processingLabel(row) {
+  if (!row) return "Waiting to process";
+  if (row.processing_status === "processing") return "Processing";
+  if (row.processing_status === "failed") return "Processing failed";
+  if (row.processing_status === "pending") return "Waiting to process";
+  return row.status || "Review";
+}
+
+function processingDetail(row) {
+  const attempt = Number(row?.processing_attempts ?? 0);
+  if (row?.processing_status === "ready") return "Ready for human review" + (attempt ? " · Attempt " + attempt : "");
+  if (row?.processing_status === "processing") {
+    return processingIsStale(row)
+      ? "Processing appears interrupted. Retry processing to continue."
+      : "AI processing attempt " + Math.max(1, attempt) + " is running. You can safely leave this page.";
+  }
+  if (row?.processing_status === "failed") {
+    return (row.processing_error_message || "AI processing failed.") + (attempt ? " · Attempt " + attempt + "/5" : "");
+  }
+  return "Waiting for AI processing to begin.";
+}
+
 function approvalProblem(row) {
   if (!row?.document_id) return "This case has no linked source document.";
+  if (row.processing_status !== "ready") {
+    if (row.processing_status === "failed") return row.processing_error_message || "AI processing failed. Retry processing before review.";
+    if (row.processing_status === "processing") return processingIsStale(row) ? "AI processing appears interrupted. Retry processing." : "AI is still processing this document.";
+    return "This document is waiting for AI processing. Retry processing to continue.";
+  }
   if (typeof row.review_revision !== "number") return "The review update is not available yet. Refresh after deployment.";
   if ((row.missing_information || "").trim()) return "Resolve the missing information using Edit Details before approving.";
   if (!(row.patient_name || "").trim() || !(row.document_type || "").trim() || !row.document_date) return "Add the patient name, document type, and document date before approving.";
@@ -878,7 +934,7 @@ async function switchWorkspaceView(view) {
     document.getElementById("reviewActionStatus").textContent = "Save Corrections or Cancel before leaving this case.";
     return;
   }
-  if (uploading || saving || loadingCases || loadingActivity || loadingSettings) return;
+  if (uploading || saving || loadingCases || loadingActivity || loadingSettings || processingRequestPending) return;
   activeView = view;
   clearReview();
   renderWorkspaceView();
@@ -1194,7 +1250,7 @@ async function inviteHospitalUser(event) {
 }
 
 function updateControls() {
-  const busy = uploading || saving || loadingCases || loadingActivity || loadingSettings || staffActionPending || sourceViewerLoading;
+  const busy = uploading || saving || loadingCases || loadingActivity || loadingSettings || staffActionPending || sourceViewerLoading || processingRequestPending;
   document.getElementById("uploadBtn").disabled = busy || editing || !organizationId;
   document.getElementById("reloadCasesBtn").disabled = busy || editing || !organizationId;
   const reloadActivityBtn = document.getElementById("reloadActivityBtn");
@@ -1213,16 +1269,23 @@ function updateControls() {
     const button = document.getElementById(id);
     if (button) button.disabled = busy || editing || !organizationId;
   });
-  document.querySelectorAll(".review-btn").forEach(function(button) {
+  document.querySelectorAll(".review-btn, .retry-processing-btn").forEach(function(button) {
     button.disabled = busy || editing;
   });
-  const unavailable = busy || editing || !currentCase?.document_id || typeof currentCase?.review_revision !== "number";
+
+  const sourceUnavailable = busy || editing || !currentCase?.document_id;
+  const unavailable = sourceUnavailable || currentCase?.processing_status !== "ready" || typeof currentCase?.review_revision !== "number";
   const problem = approvalProblem(currentCase);
   document.getElementById("approveBtn").disabled = unavailable || !!problem || currentCase?.status === "Completed" || !document.getElementById("reviewConfirmed").checked;
   document.getElementById("correctionBtn").disabled = unavailable || currentCase?.status === "Correction Required";
-  document.getElementById("viewSourceBtn").disabled = unavailable || sourceViewerLoading;
+  document.getElementById("viewSourceBtn").disabled = sourceUnavailable || sourceViewerLoading;
   document.getElementById("editDetailsBtn").disabled = unavailable;
   document.getElementById("reviewConfirmed").disabled = unavailable || !!problem || currentCase?.status === "Completed";
+  const retryButton = document.getElementById("retryProcessingBtn");
+  if (retryButton) {
+    retryButton.hidden = !canRetryProcessing(currentCase);
+    retryButton.disabled = busy || editing || !canRetryProcessing(currentCase);
+  }
   document.getElementById("approvalGuidance").textContent = currentCase ? problem || (currentCase.status === "Completed" ? "This case is completed. Editing details will reopen it for review." : "Check the saved details, then tick the confirmation box to enable approval.") : "";
   ["saveDetailsBtn", "cancelEditBtn", "correctionsConfirmed", ...Object.keys(EDIT_FIELDS)].forEach(function(id) { document.getElementById(id).disabled = busy || !editing; });
 }
@@ -1235,9 +1298,15 @@ function clearReview() {
   document.getElementById("reviewConfirmed").checked = false;
   document.getElementById("reviewPanel").style.display = "none";
   document.getElementById("reviewActionStatus").textContent = "";
-  ["reviewFileName", "reviewPatientName", "reviewDocumentType", "reviewDocumentDate", "reviewInsurance", "reviewMissingInfo", "reviewStatusText", "reviewStatusBadge", "reviewNotes"].forEach(function(id) {
-    document.getElementById(id).textContent = "";
+  ["reviewFileName", "reviewProcessingText", "reviewPatientName", "reviewDocumentType", "reviewDocumentDate", "reviewInsurance", "reviewMissingInfo", "reviewStatusText", "reviewStatusBadge", "reviewNotes"].forEach(function(id) {
+    const element = document.getElementById(id);
+    if (element) element.textContent = "";
   });
+  const processingBadge = document.getElementById("reviewProcessingBadge");
+  if (processingBadge) {
+    processingBadge.textContent = "Waiting to process";
+    processingBadge.dataset.status = "Waiting to process";
+  }
   updateControls();
 }
 
@@ -1261,7 +1330,6 @@ function renderCases() {
     const details = document.createElement("div");
     const name = document.createElement("div");
     name.className = "case-name";
-    // Filenames and extracted values are untrusted text, never HTML.
     name.textContent = caseRow.file_name || "Untitled document";
     const type = document.createElement("div");
     type.className = "case-type";
@@ -1271,7 +1339,22 @@ function renderCases() {
     actions.className = "case-actions";
     const badge = document.createElement("span");
     badge.className = "status";
-    setStatusBadge(badge, caseRow.status);
+    if (caseRow.processing_status === "ready") {
+      setStatusBadge(badge, caseRow.status);
+    } else {
+      const label = processingLabel(caseRow);
+      badge.textContent = label;
+      badge.dataset.status = label;
+    }
+    if (canRetryProcessing(caseRow)) {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "button secondary retry-processing-btn";
+      retry.textContent = "Retry Processing";
+      retry.setAttribute("aria-label", "Retry AI processing for case " + caseRow.id);
+      retry.addEventListener("click", function() { retryCaseProcessing(caseRow.id); });
+      actions.append(retry);
+    }
     const review = document.createElement("button");
     review.type = "button";
     review.className = "button review-btn";
@@ -1335,7 +1418,7 @@ function closeSourceViewer() {
 }
 
 async function openSourceViewer() {
-  if (sourceViewerLoading || saving || uploading || loadingCases || editing || !organizationId || !currentCase?.document_id) return;
+  if (sourceViewerLoading || saving || uploading || loadingCases || processingRequestPending || editing || !organizationId || !currentCase?.document_id) return;
   const request = ++sourceViewerRequest;
   const requestedOrganization = organizationId;
   const selectedCaseId = currentCase.id;
@@ -1390,6 +1473,16 @@ function renderReview(caseRow) {
   currentCase = caseRow;
   document.getElementById("reviewConfirmed").checked = false;
   document.getElementById("reviewFileName").textContent = (caseRow.file_name || "Untitled document") + " · Case #" + caseRow.id;
+  document.getElementById("reviewProcessingText").textContent = processingDetail(caseRow);
+  const processingBadge = document.getElementById("reviewProcessingBadge");
+  if (caseRow.processing_status === "ready") {
+    processingBadge.textContent = "Ready";
+    processingBadge.dataset.status = "Ready";
+  } else {
+    const label = processingLabel(caseRow);
+    processingBadge.textContent = label;
+    processingBadge.dataset.status = label;
+  }
   document.getElementById("reviewPatientName").textContent = caseRow.patient_name || "Not found";
   document.getElementById("reviewDocumentType").textContent = caseRow.document_type || "Healthcare document";
   document.getElementById("reviewDocumentDate").textContent = caseRow.document_date || "Not found";
@@ -1397,7 +1490,7 @@ function renderReview(caseRow) {
   document.getElementById("reviewMissingInfo").textContent = caseRow.missing_information || "None recorded";
   document.getElementById("reviewNotes").textContent = caseRow.review_notes || "No corrections recorded.";
   const missingBadge = document.getElementById("missingInfoBadge");
-  missingBadge.hidden = !(caseRow.missing_information || "").trim();
+  missingBadge.hidden = caseRow.processing_status !== "ready" || !(caseRow.missing_information || "").trim();
   document.getElementById("reviewStatusText").textContent = caseRow.status || "Review";
   setStatusBadge(document.getElementById("reviewStatusBadge"), caseRow.status);
   document.getElementById("reviewPanel").style.display = "block";
@@ -1423,8 +1516,9 @@ async function openCase(caseId) {
     renderReview(data);
     persistWorkspaceState();
     message.textContent = !data.document_id ? "This older case has no linked document. Review decisions are unavailable." :
-      !data.patient_name && !data.document_date && !data.insurance_information && !data.missing_information ?
-        "No extraction details are saved for this case. Check the source document before approving." : "";
+      data.processing_status === "failed" ? (data.processing_error_message || "AI processing failed. Retry processing to continue.") :
+      data.processing_status === "processing" ? (processingIsStale(data) ? "AI processing appears interrupted. Retry processing." : "AI processing is still running.") :
+      data.processing_status === "pending" ? "This document is waiting for AI processing." : "";
   } catch (error) {
     if (request === reviewRequest && requestedOrganization === organizationId) {
       message.textContent = "Could not open this case. " + (error.message || "Please try again.");
@@ -1635,6 +1729,7 @@ async function updateAuthUI() {
   loadingActivity = false;
   loadingSettings = false;
   staffActionPending = false;
+  processingRequestPending = false;
   resetDashboardMetrics();
   clearReview();
   document.getElementById("caseListStatus").textContent = "";
@@ -1798,13 +1893,59 @@ if (reloadUsersBtn) reloadUsersBtn.addEventListener("click", async function() {
 const inviteUserForm = document.getElementById("inviteUserForm");
 if (inviteUserForm) inviteUserForm.addEventListener("submit", inviteHospitalUser);
 
+async function invokeDocumentProcessing(documentId) {
+  const { data, error } = await supabaseClient.functions.invoke("process-document", {
+    body: { document_id: documentId }
+  });
+  if (error) {
+    let details = error.message || "Document processing failed.";
+    try {
+      if (error.context) {
+        const body = await error.context.clone().json();
+        details = body.error || body.message || details;
+      }
+    } catch (_) { /* Keep the original function error. */ }
+    throw new Error(details);
+  }
+  return data || {};
+}
+
+async function retryCaseProcessing(caseId) {
+  const row = savedCases.find(function(item) { return String(item.id) === String(caseId); });
+  if (!row || !canRetryProcessing(row) || processingRequestPending || !organizationId) return;
+  const selectedWasOpen = currentCase && String(currentCase.id) === String(row.id);
+  const requestedOrganization = organizationId;
+  const message = selectedWasOpen ? document.getElementById("reviewActionStatus") : document.getElementById("caseListStatus");
+  processingRequestPending = true;
+  message.textContent = "Retrying AI processing for Case #" + row.id + "...";
+  updateControls();
+  try {
+    const result = await invokeDocumentProcessing(row.document_id);
+    if (requestedOrganization !== organizationId) return;
+    message.textContent = result?.processing_status === "processing"
+      ? "AI processing is already running. Reload in a moment."
+      : "AI processing finished. Reloading the saved case...";
+  } catch (error) {
+    if (requestedOrganization === organizationId) {
+      message.textContent = error.message || "Processing retry failed. The saved case was not lost.";
+    }
+  } finally {
+    processingRequestPending = false;
+    if (requestedOrganization === organizationId) {
+      await Promise.all([loadCases(), loadDashboardMetrics()]);
+      if (selectedWasOpen) await openCase(row.id);
+    }
+    updateControls();
+  }
+}
+
 document.getElementById("uploadBtn").addEventListener("click", function() {
   document.getElementById("documentInput").click();
 });
 
 document.getElementById("documentInput").addEventListener("change", async function() {
   const file = this.files[0];
-  if (!file || uploading || saving || loadingCases || editing || !organizationId) return;
+  if (!file || uploading || saving || loadingCases || processingRequestPending || editing || !organizationId) return;
   const uploadStatus = document.getElementById("uploadStatus");
   const requestedOrganization = organizationId;
   const requestedAuth = authRequest;
@@ -1835,23 +1976,19 @@ document.getElementById("documentInput").addEventListener("change", async functi
     if (caseError) throw new Error("Case save failed: " + caseError.message);
     caseSaved = true;
     if (requestedAuth !== authRequest || requestedOrganization !== organizationId) return;
-    uploadStatus.textContent = "Uploaded successfully. AI is processing the document...";
-    const { data: aiResult, error: aiError } = await supabaseClient.functions.invoke("process-document", {
-      body: { document_id: documentRow.id }
-    });
-    if (aiError) {
-      let details = aiError.message;
-      try {
-        if (aiError.context) {
-          const body = await aiError.context.clone().json();
-          details += " | " + (body.details || body.error || "Processing error");
-        }
-      } catch (_) { /* Keep the original error if the body cannot be read. */ }
-      throw new Error("AI processing failed: " + details);
-    }
-    if (!aiResult || aiResult.success !== true) throw new Error("AI processing did not confirm success.");
-    if (requestedAuth === authRequest && requestedOrganization === organizationId) {
-      uploadStatus.textContent = "Uploaded and processed successfully: " + file.name + " ✓";
+    await loadCases();
+    uploadStatus.textContent = "Upload saved. AI is processing the document... You can safely leave this page.";
+    try {
+      const aiResult = await invokeDocumentProcessing(documentRow.id);
+      if (requestedAuth === authRequest && requestedOrganization === organizationId) {
+        uploadStatus.textContent = aiResult?.processing_status === "ready"
+          ? "Uploaded and processed successfully: " + file.name + " ✓"
+          : "Upload saved. AI processing is still running. Reload cases in a moment.";
+      }
+    } catch (processingError) {
+      if (requestedAuth === authRequest && requestedOrganization === organizationId) {
+        uploadStatus.textContent = "Upload saved. " + (processingError.message || "AI processing did not finish.") + " Use Retry Processing on the saved case.";
+      }
     }
   } catch (error) {
     if (requestedAuth === authRequest && requestedOrganization === organizationId) {
@@ -1876,7 +2013,7 @@ function closeEditor() {
 }
 
 function editDetails() {
-  if (saving || uploading || loadingCases || editing || !currentCase?.document_id) return;
+  if (saving || uploading || loadingCases || processingRequestPending || editing || !currentCase?.document_id || currentCase.processing_status !== "ready") return;
   editing = true;
   Object.entries(EDIT_FIELDS).forEach(function([id, field]) { document.getElementById(id).value = field === "review_notes" ? "" : currentCase[field] || ""; });
   document.getElementById("reviewConfirmed").checked = false;
@@ -1889,7 +2026,7 @@ function editDetails() {
 
 async function saveCorrections(event) {
   event.preventDefault();
-  if (!editing || saving || uploading || loadingCases || !currentCase?.document_id || !organizationId) return;
+  if (!editing || saving || uploading || loadingCases || processingRequestPending || !currentCase?.document_id || currentCase.processing_status !== "ready" || !organizationId) return;
   const message = document.getElementById("reviewActionStatus");
   const payload = {};
   for (const [id, field] of Object.entries(EDIT_FIELDS)) {
@@ -1918,7 +2055,7 @@ async function saveCorrections(event) {
 }
 
 async function saveCaseStatus(newStatus) {
-  if (editing || saving || uploading || loadingCases || !currentCase?.document_id || !organizationId || currentCase.status === newStatus) return;
+  if (editing || saving || uploading || loadingCases || processingRequestPending || !currentCase?.document_id || currentCase.processing_status !== "ready" || !organizationId || currentCase.status === newStatus) return;
   if (newStatus === "Completed" && (approvalProblem(currentCase) || !document.getElementById("reviewConfirmed").checked)) {
     document.getElementById("reviewActionStatus").textContent = approvalProblem(currentCase) || "Confirm you have checked the saved details before approving.";
     return;
@@ -1964,6 +2101,7 @@ async function saveCaseChange(payload, fromEditor) {
 document.getElementById("approveBtn").addEventListener("click", function() { saveCaseStatus("Completed"); });
 document.getElementById("correctionBtn").addEventListener("click", function() { saveCaseStatus("Correction Required"); });
 document.getElementById("viewSourceBtn").addEventListener("click", openSourceViewer);
+document.getElementById("retryProcessingBtn").addEventListener("click", function() { if (currentCase) retryCaseProcessing(currentCase.id); });
 document.getElementById("closeSourceViewerBtn").addEventListener("click", closeSourceViewer);
 document.getElementById("sourceViewerModal").addEventListener("click", function(event) { if (event.target === this) closeSourceViewer(); });
 window.addEventListener("keydown", function(event) { if (event.key === "Escape" && !document.getElementById("sourceViewerModal").hidden) closeSourceViewer(); });
@@ -2011,6 +2149,7 @@ supabaseClient.auth.onAuthStateChange(function(event, session) {
     loadingActivity = false;
     loadingSettings = false;
     staffActionPending = false;
+    processingRequestPending = false;
     currentAuthUserId = null;
     activeView = "dashboard";
     clearWorkspaceState();
