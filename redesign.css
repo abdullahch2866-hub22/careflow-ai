@@ -139,6 +139,7 @@ body{background:linear-gradient(135deg,#f8faf9 0%,#f1f6f5 55%,#f7f8f6 100%)}
  #loginPanel,#signupPanel,#passwordPanel,#noAccessPanel{padding:215px 18px 34px!important}
  #loginPanel:before,#signupPanel:before,#passwordPanel:before,#noAccessPanel:before{content:"CareFlow AI\A\A Secure document operations for modern care teams.";height:184px;padding:28px 24px;overflow:hidden;font-size:16px;line-height:1.45}
  #loginPanel h2,#signupPanel h2,#passwordPanel h2,#noAccessPanel h2{margin-top:0!important;color:var(--ink)!important}
+ #loginPanel h2{padding-top:32px}
  .login-support-actions{display:grid;grid-template-columns:1fr;gap:3px;margin-top:14px}
  #loginPanel .login-support-actions .button{display:block;width:100%!important;padding:8px 0!important;text-align:left!important}
  .cards{grid-template-columns:1fr 1fr}.card{grid-column:span 1;min-height:150px}
