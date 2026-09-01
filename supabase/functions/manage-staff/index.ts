@@ -1,5 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { withSupabase } from "npm:@supabase/server@^1";
+import { withSupabase } from "npm:@supabase/server@1.5.1";
 
 interface ManageStaffPayload {
   action: "invite" | "change_role" | "remove";
@@ -45,7 +45,12 @@ export default {
         return Response.json({ error: "Only hospital admins can manage staff" }, { status: 403 });
       }
 
-      const body = (await req.json()) as ManageStaffPayload;
+      let body: ManageStaffPayload;
+      try {
+        body = (await req.json()) as ManageStaffPayload;
+      } catch (_) {
+        return Response.json({ error: "Request body must be valid JSON" }, { status: 400 });
+      }
       const action = body?.action;
       const email = normalizeEmail(body?.email);
       const role = body?.role;
@@ -60,17 +65,26 @@ export default {
         return Response.json({ error: "Role must be admin or staff" }, { status: 400 });
       }
 
-      const findUser = async () => {
+      const findAuthUser = async () => {
         const { data, error } = await ctx.supabaseAdmin.rpc("careflow_service_find_auth_user", { p_email: email });
         if (error) throw error;
         const row = Array.isArray(data) ? data[0] : data;
         return row || null;
       };
 
+      const findHospitalMember = async () => {
+        const { data, error } = await ctx.supabaseAdmin.rpc("careflow_service_find_member", {
+          p_actor_user_id: actor.id,
+          p_email: email,
+        });
+        if (error) throw error;
+        const row = Array.isArray(data) ? data[0] : data;
+        return row || null;
+      };
+
       if (action === "invite") {
-        let target = await findUser();
+        let target = await findAuthUser();
         let createdByInvite = false;
-        let invitationSent = false;
 
         if (target) {
           const { data: existingMembership, error: existingMembershipError } = await ctx.supabaseAdmin
@@ -83,7 +97,7 @@ export default {
           if (existingMembership) {
             const sameHospital = existingMembership.organization_id === actorMembership.organization_id;
             return Response.json(
-              { error: sameHospital ? "This user is already a member of your hospital" : "This email already belongs to another CareFlow hospital" },
+              { error: sameHospital ? "This user is already a member of your hospital" : "This email cannot be added to your hospital" },
               { status: 409 }
             );
           }
@@ -97,7 +111,6 @@ export default {
           }
           target = { user_id: inviteData.user.id, email: inviteData.user.email || email };
           createdByInvite = true;
-          invitationSent = true;
         }
 
         const { error: addError } = await ctx.supabaseAdmin.rpc("careflow_service_add_member", {
@@ -119,16 +132,13 @@ export default {
           action,
           email,
           role,
-          invitation_sent: invitationSent,
-          message: invitationSent
-            ? "Invitation sent and hospital membership created."
-            : "Existing CareFlow account added to this hospital."
+          message: "Staff access prepared. A secure invitation is sent when the email is new to CareFlow."
         });
       }
 
-      const target = await findUser();
+      const target = await findHospitalMember();
       if (!target) {
-        return Response.json({ error: "User account not found" }, { status: 404 });
+        return Response.json({ error: "User is not a member of this hospital" }, { status: 404 });
       }
       if (target.user_id === actor.id) {
         return Response.json(
