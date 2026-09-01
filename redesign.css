@@ -195,3 +195,31 @@ body{background:linear-gradient(135deg,#f8faf9 0%,#f1f6f5 55%,#f7f8f6 100%)}
  #loginPanel .auth-form-card #showSignupBtn{text-align:left!important}
 }
 @media(max-height:760px) and (min-width:901px){.auth-brand-message{margin:35px 0}.auth-form-stage{padding-block:25px}.auth-form-card{padding-block:30px}}
+
+/* Dedicated hospital registration experience */
+#signupPanel{display:grid;grid-template-columns:minmax(480px,1fr) minmax(620px,1fr);min-height:100vh;padding:0!important;background:#f8faf9!important}
+#signupPanel:before{display:none!important}
+#signupPanel>.auth-brand-panel,#signupPanel>.auth-form-stage{position:relative;z-index:1;width:auto!important;margin:0!important}
+.signup-form-stage{overflow:auto;padding:30px clamp(34px,4vw,72px)}
+.signup-form-card{width:min(100%,650px);padding:32px 36px}
+.signup-form-card h2{font-size:32px!important}
+.signup-form-card .auth-form-intro{margin-bottom:20px!important}
+.signup-form-card #signupForm>.signup-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:15px 14px;max-width:none!important}
+.signup-form-card .staff-field{display:grid;gap:7px;color:#334e5e;font-size:11px;font-weight:740}
+.signup-form-card input{width:100%;min-width:0;margin:0!important;padding:12px 13px!important;background:#fbfdfd}
+.signup-password-help{margin-top:14px;color:#697d87;font-size:11px;line-height:1.55}
+.signup-actions{display:flex!important;grid-template-columns:none!important;gap:10px!important;margin-top:17px!important;align-items:center;flex-wrap:wrap}
+.signup-actions .button{min-height:44px;padding:10px 16px}
+#signupStatus{min-height:19px;margin-top:11px!important;color:#ad2d25;font-size:12px}
+@media(max-width:1100px){
+ #signupPanel{grid-template-columns:minmax(390px,.8fr) minmax(520px,1.2fr)}
+ .signup-form-card #signupForm>.signup-fields{grid-template-columns:1fr!important}
+}
+@media(max-width:900px){
+ #signupPanel{grid-template-columns:1fr;grid-template-rows:150px auto;min-height:100vh;padding:0!important}
+ .signup-form-stage{place-items:start center;padding:22px 16px 46px}
+ .signup-form-card{width:min(100%,560px);padding:27px 22px}
+ .signup-form-card h2{font-size:28px!important}
+ .signup-actions{display:grid!important;grid-template-columns:1fr!important}
+ .signup-actions .button{width:100%}
+}
