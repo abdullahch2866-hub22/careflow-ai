@@ -61,7 +61,7 @@ compare visible saved values after a refresh. All fixture data is fictional.
 
 ## PDF upload protection
 
-The full suite contains 58 tests. Browser tests now use File/Blob objects and
+Browser tests use File/Blob objects and
 cover type/size checks, obvious renamed and truncated PDFs, the exact 10 MB
 boundary, MIME normalization, opaque storage paths, sign-out during validation,
 and preserving open correction drafts. Processor tests cover Storage info

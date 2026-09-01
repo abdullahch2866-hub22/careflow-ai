@@ -31,10 +31,13 @@ function recordFixtureQuery(entry) {
 }
 function storeFixtureCases() { sessionStorage.setItem("careflow-fixture-cases", JSON.stringify(fixtureCases)); }
 function fixtureQuery(table) {
-  let filters = [], action = "select", payload, single = false, limit = 1000, order = [];
+  let filters = [], predicates = [], action = "select", payload, single = false, limit = 1000, order = [], selectOptions = {};
   const builder = {
-    select() { return builder; },
+    select(_columns, options = {}) { selectOptions = options; return builder; },
     eq(column, value) { filters.push([column, value]); return builder; },
+    gte(column, value) { predicates.push(row => row[column] >= value); return builder; },
+    lt(column, value) { predicates.push(row => row[column] < value); return builder; },
+    in(column, values) { predicates.push(row => values.includes(row[column])); return builder; },
     order(column, options) { order.push([column, options.ascending]); return builder; },
     limit(value) { limit = value; return builder; },
     single() { single = true; return builder; },
@@ -59,10 +62,15 @@ function fixtureQuery(table) {
           fixtureFailList = false;
           return resolve({ data: null, error: { message: "Fixture: list unavailable" } });
         }
-        let rows = fixtureEmpty ? [] : fixtureCases.filter(row => filters.every(([key, value]) => row[key] === value));
+        let rows = fixtureEmpty ? [] : fixtureCases.filter(row =>
+          filters.every(([key, value]) => row[key] === value) && predicates.every(predicate => predicate(row))
+        );
         if (action === "update") {
           rows.forEach(row => Object.assign(row, payload, { review_revision: row.review_revision + 1, updated_by: "fixture-user", updated_at: "2026-08-31T12:00:00Z" }));
           storeFixtureCases();
+        }
+        if (selectOptions.head && selectOptions.count === "exact") {
+          return resolve({ data: null, count: rows.length, error: null });
         }
         rows = [...rows].sort((a, b) => {
           for (const [key, ascending] of order) {
@@ -82,6 +90,7 @@ window.supabase = { createClient() { return {
   auth: {
     async getUser() { return { data: { user: fixtureSignedOut ? null : { id: "fixture-user" } }, error: null }; },
     async signInWithPassword() { throw new Error("Fixture does not accept credentials"); },
+    async signOut() { fixtureSignedOut = true; fixtureAuthCallback("SIGNED_OUT"); return { error: null }; },
     onAuthStateChange(callback) { fixtureAuthCallback = callback; return { data: { subscription: { unsubscribe() {} } } }; }
   },
   from: fixtureQuery,

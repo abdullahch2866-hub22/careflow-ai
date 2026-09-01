@@ -434,3 +434,59 @@ test('partial corrections keep missing items visible and approval disabled', asy
   assert.equal(p.element('missingInfoBadge').hidden,false);
   assert.equal(p.element('approveBtn').disabled,true);
 });
+
+test('the complete synthetic hospital journey survives approval, reload, source viewing, and sign-out', async () => {
+  const p = await page();
+  p.element('documentInput').files = [pdfFile('Synthetic_Final_E2E.pdf')];
+  await p.element('documentInput').dispatchEvent({type:'change'});
+  await flush();
+
+  assert.match(p.text('uploadStatus'), /Uploaded and processed successfully/);
+  await p.review(9);
+  assert.equal(p.text('reviewPatientName'), 'Uploaded Sample Patient');
+  assert.match(p.text('reviewProcessingText'), /Attempt 1/);
+
+  await p.correct({
+    editPatientName: 'Synthetic Corrected Patient',
+    editMissingInfo: '',
+    editReviewNotes: 'Synthetic E2E correction verified against fictional source.'
+  });
+  await p.confirm();
+  await p.click('approveBtn');
+  assert.equal(p.text('reviewStatusText'), 'Completed');
+  assert.equal(p.text('metricDocumentsToday'), '1');
+  assert.equal(p.text('metricAwaitingReview'), '2');
+  assert.equal(p.text('metricCompleted'), '1');
+  assert.equal(p.text('metricTimeSaved'), '15m');
+
+  await p.click('viewSourceBtn');
+  assert.equal(p.element('sourceViewerModal').hidden, false);
+  assert.match(p.element('sourcePdfFrame').src, /token=temporary/);
+  await p.click('closeSourceViewerBtn');
+
+  const reloaded = await page(p.store);
+  await reloaded.review(9);
+  assert.equal(reloaded.text('reviewPatientName'), 'Synthetic Corrected Patient');
+  assert.equal(reloaded.text('reviewStatusText'), 'Completed');
+  assert.doesNotMatch(reloaded.text('uploadedCase'), /OTHER_HOSPITAL_PRIVATE/);
+
+  await reloaded.click('signOutBtn');
+  assert.equal(reloaded.text('uploadedCase'), '');
+  assert.equal(reloaded.element('uploadBtn').disabled, true);
+
+  const calls = p.queries();
+  const expectedOrder = [
+    'rpc careflow_reserve_document_upload',
+    'storage upload ',
+    'insert documents',
+    'insert cases',
+    'invoke process-document',
+    'update cases',
+    'invoke view-document'
+  ];
+  let cursor = -1;
+  for (const expected of expectedOrder) {
+    cursor = calls.findIndex((entry, index) => index > cursor && entry.startsWith(expected));
+    assert.notEqual(cursor, -1, 'Expected workflow call: ' + expected);
+  }
+});
