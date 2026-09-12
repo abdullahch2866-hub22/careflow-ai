@@ -443,6 +443,7 @@
 
       <h3>Settings</h3>
       <button type="button" id="navOrganization" class="nav-item" data-view="organization"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V8l8-5 8 5v13M9 21v-6h6v6M8 10h.01M12 10h.01M16 10h.01"/></svg><span>Organization</span></button>
+      <button type="button" id="navBilling" class="nav-item" data-view="billing"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h3"/></svg><span>Billing</span></button>
       <button type="button" id="navUsers" class="nav-item" data-view="users"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6M17 14a5 5 0 0 1 4 5v1"/></svg><span>Users</span></button>
     </aside>
 
@@ -533,6 +534,36 @@
           <div class="settings-card"><div class="settings-label">Workspace created</div><div id="organizationCreatedAt" class="settings-value">—</div></div>
         </div>
         <p class="review-help" style="padding:0 20px 20px;">Workspace details are read-only here. Hospital administrators can manage staff access and roles from the Users section.</p>
+      </section>
+
+      <section id="billingSection" class="recent" hidden>
+        <div class="recent-header case-list-header">
+          <span class="section-heading"><span class="section-heading-icon" aria-hidden="true">$</span><span>Billing<small>Subscription and secure checkout</small></span></span>
+          <button type="button" id="reloadBillingBtn" class="button" disabled>Reload billing</button>
+        </div>
+        <p id="billingStatus" role="status"></p>
+        <div class="billing-overview">
+          <div class="billing-plan-card">
+            <div>
+              <div class="settings-label">CareFlow access</div>
+              <div id="billingPlan" class="billing-plan-name">CareFlow AI subscription</div>
+              <p class="review-help">Secure software access for this hospital workspace.</p>
+            </div>
+            <span id="billingStatusBadge" class="status" data-billing-status="none">Not connected</span>
+          </div>
+          <div class="settings-grid billing-details-grid">
+            <div class="settings-card"><div class="settings-label">Payment provider</div><div class="settings-value">Lemon Squeezy</div></div>
+            <div class="settings-card"><div class="settings-label">Next billing date</div><div id="billingRenewal" class="settings-value">—</div></div>
+            <div class="settings-card"><div class="settings-label">Payment mode</div><div id="billingMode" class="settings-value">Secure checkout</div></div>
+          </div>
+          <div class="billing-action-panel">
+            <div>
+              <h3>Manage CareFlow access</h3>
+              <p class="review-help">Only a hospital admin can start checkout. Payment details stay with the payment provider and are never stored in CareFlow.</p>
+            </div>
+            <button type="button" id="billingCheckoutBtn" class="button" disabled>Open secure checkout <span aria-hidden="true">→</span></button>
+          </div>
+        </div>
       </section>
 
       <section id="usersSection" class="recent" hidden>
@@ -683,6 +714,7 @@ const SUPABASE_KEY = "sb_publishable_ucOmAjy6eXWdy-OPr9qCrQ_HkceYeN8";
 const CAREFLOW_APP_URL = "https://abdullahch2866-hub22.github.io/careflow-ai/";
 const careflowLocation = (typeof window !== "undefined" && window.location) ? window.location : { hash: "", search: "" };
 let recoveryFlowRequested = (careflowLocation.hash || "").includes("type=recovery") || new URLSearchParams(careflowLocation.search || "").get("type") === "recovery";
+let billingReturnRequested = (careflowLocation.hash || "").includes("billing=success");
 let passwordFlowMode = null;
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const CASE_COLUMNS = "id, document_id, organization_id, file_name, document_type, status, created_at, patient_name, document_date, insurance_information, missing_information, review_notes, review_revision, review_confirmed, updated_at, updated_by, processing_status, processing_error_code, processing_error_message, processing_attempts, processing_started_at, processing_completed_at, processing_retryable";
@@ -724,6 +756,10 @@ let organizationMembers = [];
 let loadingSettings = false;
 let settingsRequest = 0;
 let staffActionPending = false;
+let billingSubscription = null;
+let loadingBilling = false;
+let billingRequest = 0;
+let billingCheckoutPending = false;
 let activeView = "dashboard";
 let editing = false;
 let sourceViewerLoading = false;
@@ -894,7 +930,7 @@ async function loadDashboardMetrics() {
   }
 }
 
-const WORKSPACE_NAV_IDS = ["navDashboard", "navDocuments", "navReview", "navCompleted", "navActivity", "navOrganization", "navUsers"];
+const WORKSPACE_NAV_IDS = ["navDashboard", "navDocuments", "navReview", "navCompleted", "navActivity", "navOrganization", "navBilling", "navUsers"];
 const NAV_VIEW_BY_ID = {
   navDashboard: "dashboard",
   navDocuments: "documents",
@@ -902,6 +938,7 @@ const NAV_VIEW_BY_ID = {
   navCompleted: "completed",
   navActivity: "activity",
   navOrganization: "organization",
+  navBilling: "billing",
   navUsers: "users"
 };
 
@@ -943,6 +980,11 @@ const VIEW_CONFIG = {
     title: "Organization",
     subtitle: "View the hospital workspace connected to your account.",
     listTitle: "Organization"
+  },
+  billing: {
+    title: "Billing",
+    subtitle: "View this hospital's CareFlow subscription and open secure checkout.",
+    listTitle: "Billing"
   },
   users: {
     title: "Users",
@@ -988,14 +1030,16 @@ function renderWorkspaceView() {
   const isDashboard = activeView === "dashboard";
   const isActivity = activeView === "activity";
   const isOrganization = activeView === "organization";
+  const isBilling = activeView === "billing";
   const isUsers = activeView === "users";
-  const isSettings = isOrganization || isUsers;
+  const isSettings = isOrganization || isBilling || isUsers;
   const cards = document.getElementById("dashboardCards");
   const metricsStatus = document.getElementById("dashboardMetricsStatus");
   const uploadSection = document.getElementById("uploadSection");
   const caseListSection = document.getElementById("caseListSection");
   const activitySection = document.getElementById("activityLogSection");
   const organizationSection = document.getElementById("organizationSection");
+  const billingSection = document.getElementById("billingSection");
   const usersSection = document.getElementById("usersSection");
   if (cards) cards.hidden = !isDashboard;
   if (metricsStatus) metricsStatus.hidden = !isDashboard;
@@ -1003,6 +1047,7 @@ function renderWorkspaceView() {
   if (caseListSection) caseListSection.hidden = isActivity || isSettings;
   if (activitySection) activitySection.hidden = !isActivity;
   if (organizationSection) organizationSection.hidden = !isOrganization;
+  if (billingSection) billingSection.hidden = !isBilling;
   if (usersSection) usersSection.hidden = !isUsers;
 
   WORKSPACE_NAV_IDS.forEach(function(id) {
@@ -1018,13 +1063,17 @@ async function switchWorkspaceView(view) {
     document.getElementById("reviewActionStatus").textContent = "Save Corrections or Cancel before leaving this case.";
     return;
   }
-  if (uploading || saving || loadingCases || loadingActivity || loadingSettings || processingRequestPending) return;
+  if (uploading || saving || loadingCases || loadingActivity || loadingSettings || loadingBilling || billingCheckoutPending || processingRequestPending) return;
   activeView = view;
   clearReview();
   renderWorkspaceView();
   persistWorkspaceState();
   if (view === "activity") await loadActivityLog();
   if (view === "organization") await loadOrganizationSettings();
+  if (view === "billing") {
+    await loadOrganizationSettings();
+    await loadBilling();
+  }
   if (view === "users") {
     await loadOrganizationSettings();
     await loadOrganizationMembers();
@@ -1131,6 +1180,117 @@ function renderOrganizationSettings() {
   document.getElementById("organizationMemberCount").textContent = organizationSettings?.member_count == null ? "—" : String(organizationSettings.member_count);
   document.getElementById("organizationCreatedAt").textContent = formatWorkspaceDate(organizationSettings?.organization_created_at);
   renderStaffAdminVisibility();
+  renderBilling();
+}
+
+function billingStatusLabel(status) {
+  const labels = {
+    on_trial: "Trial",
+    active: "Active",
+    paused: "Paused",
+    past_due: "Payment due",
+    unpaid: "Unpaid",
+    cancelled: "Cancelling",
+    expired: "Expired"
+  };
+  return labels[status] || "Not connected";
+}
+
+function renderBilling() {
+  const status = billingSubscription?.status || "none";
+  const badge = document.getElementById("billingStatusBadge");
+  const planParts = [billingSubscription?.product_name, billingSubscription?.variant_name].filter(Boolean);
+  document.getElementById("billingPlan").textContent = planParts.join(" · ") || "CareFlow AI subscription";
+  document.getElementById("billingRenewal").textContent = formatWorkspaceDate(
+    status === "cancelled" || status === "expired" ? billingSubscription?.ends_at : billingSubscription?.renews_at
+  );
+  document.getElementById("billingMode").textContent = billingSubscription?.test_mode ? "Test payment" : "Secure checkout";
+  badge.textContent = billingStatusLabel(status);
+  badge.dataset.billingStatus = status;
+  const checkout = document.getElementById("billingCheckoutBtn");
+  checkout.hidden = !isOrganizationAdmin();
+  checkout.textContent = billingSubscription && status !== "expired" ? "Subscription already connected" : "Open secure checkout →";
+  updateControls();
+}
+
+async function loadBilling() {
+  if (!organizationId) return false;
+  const request = ++billingRequest;
+  const requestedOrganization = organizationId;
+  const status = document.getElementById("billingStatus");
+  status.textContent = "Loading billing...";
+  loadingBilling = true;
+  updateControls();
+  try {
+    const { data, error } = await supabaseClient
+      .from("organization_subscriptions")
+      .select("organization_id, product_name, variant_name, status, renews_at, ends_at, test_mode")
+      .eq("organization_id", requestedOrganization)
+      .maybeSingle();
+    if (request !== billingRequest || requestedOrganization !== organizationId) return false;
+    if (error) throw error;
+    billingSubscription = data || null;
+    renderBilling();
+    status.textContent = billingReturnRequested && !data
+      ? "Payment completed. Waiting for the secure subscription update; reload billing in a moment."
+      : "";
+    if (billingReturnRequested) {
+      billingReturnRequested = false;
+      history.replaceState({}, document.title, CAREFLOW_APP_URL);
+    }
+    return true;
+  } catch (error) {
+    if (request === billingRequest && requestedOrganization === organizationId) {
+      billingSubscription = null;
+      renderBilling();
+      status.textContent = "Could not load billing. " + (error.message || "Please try again.");
+    }
+    return false;
+  } finally {
+    if (request === billingRequest && requestedOrganization === organizationId) {
+      loadingBilling = false;
+      updateControls();
+    }
+  }
+}
+
+async function openBillingCheckout() {
+  if (!organizationId || !isOrganizationAdmin() || billingCheckoutPending ||
+      (billingSubscription && billingSubscription.status !== "expired")) return false;
+  const requestedOrganization = organizationId;
+  const status = document.getElementById("billingStatus");
+  billingCheckoutPending = true;
+  status.textContent = "Preparing secure checkout...";
+  updateControls();
+  try {
+    const { data, error } = await supabaseClient.functions.invoke("create-billing-checkout", { body: {} });
+    if (error) {
+      let details = error.message || "Checkout could not be prepared.";
+      try {
+        if (error.context) {
+          const body = await error.context.clone().json();
+          details = body.error || body.message || details;
+        }
+      } catch (_) { /* Keep the original function error. */ }
+      throw new Error(details);
+    }
+    if (requestedOrganization !== organizationId) return false;
+    const checkoutUrl = new URL(data?.checkout_url || "");
+    if (checkoutUrl.protocol !== "https:" ||
+        !(checkoutUrl.hostname === "lemonsqueezy.com" || checkoutUrl.hostname.endsWith(".lemonsqueezy.com"))) {
+      throw new Error("The payment provider returned an invalid checkout link.");
+    }
+    window.location.assign(checkoutUrl.href);
+    return true;
+  } catch (error) {
+    if (requestedOrganization === organizationId) {
+      status.textContent = error.message || "Secure checkout is unavailable. Please try again.";
+    }
+    return false;
+  } finally {
+    billingCheckoutPending = false;
+    updateControls();
+  }
 }
 
 async function loadOrganizationSettings() {
@@ -1334,7 +1494,7 @@ async function inviteHospitalUser(event) {
 }
 
 function updateControls() {
-  const busy = uploading || saving || loadingCases || loadingActivity || loadingSettings || staffActionPending || sourceViewerLoading || processingRequestPending;
+  const busy = uploading || saving || loadingCases || loadingActivity || loadingSettings || loadingBilling || billingCheckoutPending || staffActionPending || sourceViewerLoading || processingRequestPending;
   document.getElementById("uploadBtn").disabled = busy || editing || !organizationId;
   document.getElementById("reloadCasesBtn").disabled = busy || editing || !organizationId;
   const reloadActivityBtn = document.getElementById("reloadActivityBtn");
@@ -1343,6 +1503,10 @@ function updateControls() {
   if (reloadOrganizationBtn) reloadOrganizationBtn.disabled = busy || editing || !organizationId;
   const reloadUsersBtn = document.getElementById("reloadUsersBtn");
   if (reloadUsersBtn) reloadUsersBtn.disabled = busy || editing || !organizationId;
+  const reloadBillingBtn = document.getElementById("reloadBillingBtn");
+  if (reloadBillingBtn) reloadBillingBtn.disabled = busy || editing || !organizationId;
+  const billingCheckoutBtn = document.getElementById("billingCheckoutBtn");
+  if (billingCheckoutBtn) billingCheckoutBtn.disabled = busy || !isOrganizationAdmin() || !!(billingSubscription && billingSubscription.status !== "expired");
   const inviteUserBtn = document.getElementById("inviteUserBtn");
   const inviteUserEmail = document.getElementById("inviteUserEmail");
   const inviteUserRole = document.getElementById("inviteUserRole");
@@ -1818,8 +1982,12 @@ async function updateAuthUI() {
   activityLogEntries = [];
   organizationSettings = null;
   organizationMembers = [];
+  billingSubscription = null;
   loadingActivity = false;
   loadingSettings = false;
+  loadingBilling = false;
+  billingRequest += 1;
+  billingCheckoutPending = false;
   staffActionPending = false;
   processingRequestPending = false;
   resetDashboardMetrics();
@@ -1844,7 +2012,7 @@ async function updateAuthUI() {
     currentAuthUserId = user.id;
     setSignupPanelVisible(false);
     const restoreState = readWorkspaceState(user.id);
-    activeView = restoreState?.view || "dashboard";
+    activeView = billingReturnRequested ? "billing" : restoreState?.view || "dashboard";
     renderWorkspaceView();
     document.getElementById("currentUserEmail").textContent = user.email || "Signed in";
     const invitedNeedsPassword = !!user.user_metadata?.careflow_invited_organization && user.user_metadata?.careflow_password_set !== true;
@@ -1891,11 +2059,15 @@ async function updateAuthUI() {
     if (request !== authRequest || !organizationId) return;
     if (activeView === "activity") await loadActivityLog();
     if (activeView === "organization") await loadOrganizationSettings();
+    if (activeView === "billing") {
+      await loadOrganizationSettings();
+      await loadBilling();
+    }
     if (activeView === "users") {
       await loadOrganizationSettings();
       await loadOrganizationMembers();
     }
-    if (restoreState?.caseId && !["activity", "organization", "users"].includes(activeView)) {
+    if (restoreState?.caseId && !["activity", "organization", "billing", "users"].includes(activeView)) {
       await openCase(restoreState.caseId);
       if (restoreState.editorOpen && currentCase && String(currentCase.id) === String(restoreState.caseId)) {
         editDetails();
@@ -1977,6 +2149,10 @@ const reloadActivityBtn = document.getElementById("reloadActivityBtn");
 if (reloadActivityBtn) reloadActivityBtn.addEventListener("click", loadActivityLog);
 const reloadOrganizationBtn = document.getElementById("reloadOrganizationBtn");
 if (reloadOrganizationBtn) reloadOrganizationBtn.addEventListener("click", loadOrganizationSettings);
+const reloadBillingBtn = document.getElementById("reloadBillingBtn");
+if (reloadBillingBtn) reloadBillingBtn.addEventListener("click", loadBilling);
+const billingCheckoutBtn = document.getElementById("billingCheckoutBtn");
+if (billingCheckoutBtn) billingCheckoutBtn.addEventListener("click", openBillingCheckout);
 const reloadUsersBtn = document.getElementById("reloadUsersBtn");
 if (reloadUsersBtn) reloadUsersBtn.addEventListener("click", async function() {
   await loadOrganizationSettings();
