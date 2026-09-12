@@ -532,7 +532,7 @@
           <div class="settings-card"><div class="settings-label">Active members</div><div id="organizationMemberCount" class="settings-value">—</div></div>
           <div class="settings-card"><div class="settings-label">Workspace created</div><div id="organizationCreatedAt" class="settings-value">—</div></div>
         </div>
-        <p class="review-help" style="padding:0 20px 20px;">Organization settings are read-only while CareFlow's staff-management controls are being completed.</p>
+        <p class="review-help" style="padding:0 20px 20px;">Workspace details are read-only here. Hospital administrators can manage staff access and roles from the Users section.</p>
       </section>
 
       <section id="usersSection" class="recent" hidden>
@@ -951,6 +951,13 @@ const VIEW_CONFIG = {
   }
 };
 
+function dashboardGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
+
 function casesForActiveView() {
   if (activeView === "review") {
     return savedCases.filter(function(row) { return ["Review", "Correction Required"].includes(row.status); });
@@ -974,7 +981,7 @@ function renderWorkspaceView() {
   const title = document.getElementById("workspaceTitle");
   const subtitle = document.getElementById("workspaceSubtitle");
   const listTitle = document.getElementById("caseListTitle");
-  if (title) title.textContent = config.title;
+  if (title) title.textContent = activeView === "dashboard" ? dashboardGreeting() : config.title;
   if (subtitle) subtitle.textContent = config.subtitle;
   if (listTitle) listTitle.textContent = config.listTitle;
 
