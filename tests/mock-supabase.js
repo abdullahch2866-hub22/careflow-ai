@@ -50,7 +50,7 @@ function fixtureQuery(table) {
         if (table === "documents" && action === "insert") return resolve({ data: { id: "fixture-document-new" }, error: null });
         if (table !== "cases") throw new Error("Unexpected fixture table");
         if (action === "insert") {
-          fixtureCases.push({ ...payload[0], id: 9, created_at: "2026-09-01T00:00:00Z", review_revision: 0, review_confirmed: false, review_notes: null, processing_status: 'pending', processing_attempts: 0, processing_error_code: null, processing_error_message: null, processing_started_at: null, processing_completed_at: null, processing_retryable: true });
+          fixtureCases.push({ ...payload[0], id: 9, created_at: new Date().toISOString(), review_revision: 0, review_confirmed: false, review_notes: null, processing_status: 'pending', processing_attempts: 0, processing_error_code: null, processing_error_message: null, processing_started_at: null, processing_completed_at: null, processing_retryable: true });
           storeFixtureCases();
           return resolve({ data: null, error: null });
         }
