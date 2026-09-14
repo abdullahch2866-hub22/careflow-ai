@@ -1,22 +1,11 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "npm:@supabase/server@1.5.1";
 
-const CHECKOUT_API = "https://api.lemonsqueezy.com/v1/checkouts";
-const CAREFLOW_APP_URL = "https://abdullahch2866-hub22.github.io/careflow-ai/";
+const PADDLE_PRICE_ID = "pri_01m2gcpjxz4wqjft7z10zcz3zq";
 
-function digits(value: string | undefined) {
-  return typeof value === "string" && /^[0-9]+$/.test(value) ? value : "";
-}
-
-function checkoutHostIsSafe(value: unknown) {
-  if (typeof value !== "string") return false;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" &&
-      (url.hostname === "lemonsqueezy.com" || url.hostname.endsWith(".lemonsqueezy.com"));
-  } catch (_) {
-    return false;
-  }
+function isUuid(value: unknown) {
+  return typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 export default {
@@ -45,12 +34,7 @@ export default {
         return Response.json({ error: "Only hospital admins can manage billing" }, { status: 403 });
       }
 
-      const apiKey = Deno.env.get("LEMONSQUEEZY_API_KEY") || "";
-      const storeId = digits(Deno.env.get("LEMONSQUEEZY_STORE_ID"));
-      const variantId = digits(Deno.env.get("LEMONSQUEEZY_VARIANT_ID"));
-      const testMode = (Deno.env.get("LEMONSQUEEZY_TEST_MODE") || "true").toLowerCase() !== "false";
-
-      if (!apiKey || !storeId || !variantId) {
+      if (!Deno.env.get("PADDLE_WEBHOOK_SECRET")) {
         return Response.json(
           { error: "Secure payments are being activated. Please try again later." },
           { status: 503 }
@@ -66,81 +50,38 @@ export default {
       if (subscriptionError) throw subscriptionError;
       if (subscription && subscription.status !== "expired") {
         return Response.json(
-          { error: "This hospital already has a subscription record. Contact CareFlow before starting another checkout." },
+          { error: "This hospital already has a subscription. Contact CareFlow before starting another checkout." },
           { status: 409 }
         );
       }
 
-      const { data: reserved, error: reserveError } = await ctx.supabaseAdmin.rpc(
-        "careflow_service_reserve_billing_checkout",
-        { p_organization_id: membership.organization_id, p_user_id: actor.id }
+      const { data: checkoutReference, error: checkoutError } = await ctx.supabaseAdmin.rpc(
+        "careflow_service_prepare_billing_checkout",
+        {
+          p_organization_id: membership.organization_id,
+          p_user_id: actor.id,
+          p_price_id: PADDLE_PRICE_ID,
+        }
       );
-      if (reserveError) throw reserveError;
-      if (reserved !== true) {
+
+      if (checkoutError) throw checkoutError;
+      if (!isUuid(checkoutReference)) {
         return Response.json(
           { error: "Too many checkout requests. Wait 15 minutes and try again." },
           { status: 429 }
         );
       }
 
-      const response = await fetch(CHECKOUT_API, {
-        method: "POST",
-        signal: AbortSignal.timeout(10000),
-        headers: {
-          Accept: "application/vnd.api+json",
-          "Content-Type": "application/vnd.api+json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          data: {
-            type: "checkouts",
-            attributes: {
-              product_options: {
-                redirect_url: CAREFLOW_APP_URL + "#billing=success",
-                enabled_variants: [Number(variantId)],
-              },
-              checkout_options: {
-                embed: false,
-                media: false,
-                logo: true,
-                desc: true,
-                discount: true,
-                subscription_preview: true,
-                button_color: "#10988d",
-              },
-              checkout_data: {
-                email: actor.email || "",
-                custom: {
-                  organization_id: membership.organization_id,
-                  careflow_user_id: actor.id,
-                },
-              },
-              test_mode: testMode,
-              expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-            },
-            relationships: {
-              store: { data: { type: "stores", id: storeId } },
-              variant: { data: { type: "variants", id: variantId } },
-            },
-          },
-        }),
+      return Response.json({
+        success: true,
+        checkout_reference: checkoutReference,
+        price_id: PADDLE_PRICE_ID,
+        customer_email: typeof actor.email === "string" ? actor.email : "",
       });
-
-      let providerBody: any = null;
-      try { providerBody = await response.json(); } catch (_) { /* Report a generic provider error below. */ }
-
-      const checkoutUrl = providerBody?.data?.attributes?.url;
-      if (!response.ok || !checkoutHostIsSafe(checkoutUrl)) {
-        console.error("Lemon Squeezy checkout creation failed", {
-          status: response.status,
-          request_id: response.headers.get("X-Request-ID"),
-        });
-        return Response.json({ error: "Secure checkout is temporarily unavailable." }, { status: 502 });
-      }
-
-      return Response.json({ success: true, checkout_url: checkoutUrl, test_mode: testMode });
     } catch (error) {
-      console.error(error);
+      console.error("Paddle checkout preparation failed", {
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
       return Response.json({ error: "Could not prepare secure checkout." }, { status: 500 });
     }
   }),

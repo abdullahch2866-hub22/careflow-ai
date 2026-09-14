@@ -16,10 +16,14 @@ const webhookSource = fs.readFileSync(
 
 const organizationId = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa';
 const userId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
-const checkoutUrl = 'https://careflow-test.lemonsqueezy.com/checkout/custom/synthetic';
+const checkoutReference = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const priceId = 'pri_01m2gcpjxz4wqjft7z10zcz3zq';
+const eventId = 'evt_01m2gcpjxz4wqjft7z10zcz3zq';
+const subscriptionId = 'sub_01h00000000000000000000000';
+const customerId = 'ctm_01h11111111111111111111111';
 
 function checkoutFixture(options = {}) {
-  const calls = { provider: [], rpcs: [] };
+  const calls = { rpcs: [] };
   const scoped = {
     auth: {
       async getUser() {
@@ -47,34 +51,21 @@ function checkoutFixture(options = {}) {
   const admin = {
     async rpc(name, args) {
       calls.rpcs.push({ name, args });
-      assert.equal(name, 'careflow_service_reserve_billing_checkout');
-      return { data: options.rateLimited ? false : true, error: null };
+      assert.equal(name, 'careflow_service_prepare_billing_checkout');
+      if (options.databaseFailure) return { data: null, error: { message: 'Synthetic failure' } };
+      return { data: options.rateLimited ? null : checkoutReference, error: null };
     },
   };
   const executable = stripTypeScriptTypes(checkoutSource.replace(/^import .*;\s*$/gm, ''), { mode: 'strip' })
     .replace('export default', 'const createBillingCheckout =');
   const context = vm.createContext({
-    Response, Request, URL, Date, AbortSignal,
+    Response, Request,
     console: { error() {} },
-    Deno: {
-      env: {
-        get(name) {
-          if (options.missingConfig && name === 'LEMONSQUEEZY_API_KEY') return null;
-          return {
-            LEMONSQUEEZY_API_KEY: 'synthetic-secret',
-            LEMONSQUEEZY_STORE_ID: '100',
-            LEMONSQUEEZY_VARIANT_ID: '200',
-            LEMONSQUEEZY_TEST_MODE: 'true',
-          }[name] || null;
-        },
-      },
-    },
+    Deno: { env: { get(name) {
+      if (name === 'PADDLE_WEBHOOK_SECRET' && !options.missingConfig) return 'synthetic-webhook-secret';
+      return null;
+    } } },
     withSupabase(config, handler) { assert.equal(config.auth, 'user'); return handler; },
-    async fetch(url, request) {
-      calls.provider.push({ url, request });
-      if (options.providerFailure) return Response.json({ errors: [] }, { status: 503 });
-      return Response.json({ data: { attributes: { url: options.unsafeUrl || checkoutUrl } } });
-    },
   });
   vm.runInContext(executable, context);
 
@@ -97,14 +88,13 @@ function webhookFixture(options = {}) {
   const executable = stripTypeScriptTypes(webhookSource.replace(/^import .*;\s*$/gm, ''), { mode: 'strip' })
     .replace('Deno.serve(', 'captureHandler(');
   const environment = {
-    LEMONSQUEEZY_WEBHOOK_SECRET: 'synthetic-webhook-secret',
-    LEMONSQUEEZY_STORE_ID: '100',
-    LEMONSQUEEZY_TEST_MODE: 'true',
+    PADDLE_WEBHOOK_SECRET: 'synthetic-webhook-secret',
+    PADDLE_ENVIRONMENT: options.sandbox ? 'sandbox' : 'live',
     SUPABASE_URL: 'https://fixture.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'synthetic-service-role-key',
   };
   const context = vm.createContext({
-    Response, Request, URL, Date, TextEncoder, Uint8Array, crypto,
+    Response, Request, Date, TextEncoder, Uint8Array, crypto, RegExp,
     console: { error() {} },
     Deno: { env: { get(name) { return environment[name] || null; } } },
     captureHandler(value) { handler = value; },
@@ -121,26 +111,28 @@ function webhookFixture(options = {}) {
   });
   vm.runInContext(executable, context);
 
-  async function sign(body) {
+  async function sign(timestamp, body) {
     const key = await crypto.subtle.importKey(
-      'raw', new TextEncoder().encode(environment.LEMONSQUEEZY_WEBHOOK_SECRET),
+      'raw', new TextEncoder().encode(environment.PADDLE_WEBHOOK_SECRET),
       { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
     );
-    const signature = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body)));
+    const signedPayload = `${timestamp}:${body}`;
+    const signature = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(signedPayload)));
     return Array.from(signature, byte => byte.toString(16).padStart(2, '0')).join('');
   }
 
   return {
     calls,
-    async invoke(payload, eventName = 'subscription_created', signatureOverride) {
+    async invoke(payload, options = {}) {
       const body = JSON.stringify(payload);
+      const timestamp = options.timestamp || String(Math.floor(Date.now() / 1000));
+      const signature = options.signature ?? await sign(timestamp, body);
       const response = await handler(new Request('https://fixture.invalid/webhook', {
         method: 'POST',
         body,
         headers: {
           'Content-Type': 'application/json',
-          'X-Event-Name': eventName,
-          'X-Signature': signatureOverride ?? await sign(body),
+          'Paddle-Signature': `ts=${timestamp};h1=${signature}`,
         },
       }));
       return { status: response.status, body: await response.json() };
@@ -149,25 +141,33 @@ function webhookFixture(options = {}) {
 }
 
 function subscriptionPayload(overrides = {}) {
-  return {
-    meta: { event_name: 'subscription_created', custom_data: { organization_id: organizationId } },
+  const base = {
+    event_id: eventId,
+    event_type: 'subscription.created',
+    occurred_at: '2026-09-14T20:00:00Z',
     data: {
-      type: 'subscriptions',
-      id: '300',
-      attributes: {
-        store_id: 100,
-        customer_id: 400,
-        variant_id: 200,
-        product_name: 'CareFlow AI',
-        variant_name: 'Paid pilot',
-        status: 'active',
-        renews_at: '2026-10-12T00:00:00Z',
-        ends_at: null,
-        updated_at: '2026-09-12T00:00:00Z',
-        test_mode: true,
-        ...overrides,
+      id: subscriptionId,
+      customer_id: customerId,
+      status: 'active',
+      next_billed_at: '2026-10-14T20:00:00Z',
+      canceled_at: null,
+      scheduled_change: null,
+      current_billing_period: {
+        starts_at: '2026-09-14T20:00:00Z',
+        ends_at: '2026-10-14T20:00:00Z',
       },
+      updated_at: '2026-09-14T20:00:00Z',
+      custom_data: { careflow_checkout_reference: checkoutReference },
+      items: [{
+        price: { id: priceId, name: 'Founding Clinic', description: 'Monthly clinic subscription' },
+        product: { name: 'CareFlow AI Clinic Subscription' },
+      }],
     },
+  };
+  return {
+    ...base,
+    ...overrides,
+    data: { ...base.data, ...(overrides.data || {}) },
   };
 }
 
@@ -177,70 +177,83 @@ test('checkout requires a valid session and hospital-admin role', async () => {
   assert.equal((await checkoutFixture({ role: 'staff' }).invoke()).status, 403);
 });
 
-test('checkout fails closed when provider setup is missing or rate-limited', async () => {
-  const missing = checkoutFixture({ missingConfig: true });
-  assert.equal((await missing.invoke()).status, 503);
-  assert.equal(missing.calls.provider.length, 0);
-
-  const limited = checkoutFixture({ rateLimited: true });
-  assert.equal((await limited.invoke()).status, 429);
-  assert.equal(limited.calls.provider.length, 0);
-});
-
-test('checkout uses the provider price and server-owned hospital identity', async () => {
+test('checkout returns a one-time server-owned reference for the fixed Paddle price', async () => {
   const fixture = checkoutFixture();
   const response = await fixture.invoke();
   assert.equal(response.status, 200);
-  assert.equal(response.body.checkout_url, checkoutUrl);
-  const provider = fixture.calls.provider[0];
-  assert.equal(provider.url, 'https://api.lemonsqueezy.com/v1/checkouts');
-  const body = JSON.parse(provider.request.body);
-  assert.equal(body.data.attributes.checkout_data.custom.organization_id, organizationId);
-  assert.equal(body.data.attributes.checkout_data.custom.careflow_user_id, userId);
-  assert.equal(body.data.attributes.checkout_data.email, 'admin@example.test');
-  assert.equal(body.data.attributes.test_mode, true);
-  assert.equal(body.data.attributes.custom_price, undefined);
+  assert.equal(response.body.checkout_reference, checkoutReference);
+  assert.equal(response.body.price_id, priceId);
+  assert.equal(response.body.customer_email, 'admin@example.test');
+  const call = fixture.calls.rpcs[0];
+  assert.equal(call.name, 'careflow_service_prepare_billing_checkout');
+  assert.equal(call.args.p_organization_id, organizationId);
+  assert.equal(call.args.p_user_id, userId);
+  assert.equal(call.args.p_price_id, priceId);
 });
 
-test('checkout refuses duplicate subscriptions and unsafe redirect URLs', async () => {
+test('checkout is rate-limited and refuses duplicate subscriptions', async () => {
+  const missing = checkoutFixture({ missingConfig: true });
+  assert.equal((await missing.invoke()).status, 503);
+  assert.equal(missing.calls.rpcs.length, 0);
+
+  assert.equal((await checkoutFixture({ rateLimited: true }).invoke()).status, 429);
   const duplicate = checkoutFixture({ subscription: { status: 'active', ends_at: null } });
   assert.equal((await duplicate.invoke()).status, 409);
-  assert.equal(duplicate.calls.provider.length, 0);
-
-  const unsafe = checkoutFixture({ unsafeUrl: 'https://evil.example/checkout' });
-  assert.equal((await unsafe.invoke()).status, 502);
+  assert.equal(duplicate.calls.rpcs.length, 0);
 });
 
-test('webhook rejects forged signatures before any database call', async () => {
-  const fixture = webhookFixture();
-  const response = await fixture.invoke(subscriptionPayload(), 'subscription_created', '0'.repeat(64));
-  assert.equal(response.status, 401);
-  assert.equal(fixture.calls.rpcs.length, 0);
+test('webhook rejects forged and stale signatures before any database call', async () => {
+  const forged = webhookFixture();
+  assert.equal((await forged.invoke(subscriptionPayload(), { signature: '0'.repeat(64) })).status, 401);
+  assert.equal(forged.calls.rpcs.length, 0);
+
+  const stale = webhookFixture();
+  assert.equal((await stale.invoke(subscriptionPayload(), { timestamp: '1' })).status, 401);
+  assert.equal(stale.calls.rpcs.length, 0);
 });
 
-test('a valid signed subscription event is reduced to safe billing fields', async () => {
+test('a valid Paddle subscription event is reduced to safe billing fields', async () => {
   const fixture = webhookFixture();
   const response = await fixture.invoke(subscriptionPayload());
   assert.equal(response.status, 200);
   assert.equal(response.body.result, 'applied');
   const call = fixture.calls.rpcs[0];
-  assert.equal(call.name, 'careflow_service_apply_billing_event');
-  assert.equal(call.args.p_organization_id, organizationId);
-  assert.equal(call.args.p_subscription_id, '300');
+  assert.equal(call.name, 'careflow_service_apply_paddle_event');
+  assert.equal(call.args.p_checkout_reference, checkoutReference);
+  assert.equal(call.args.p_subscription_id, subscriptionId);
+  assert.equal(call.args.p_customer_id, customerId);
+  assert.equal(call.args.p_price_id, priceId);
   assert.equal(call.args.p_status, 'active');
-  assert.match(call.args.p_event_id, /^subscription_created:[0-9a-f]{64}$/);
-  assert.equal(call.args.p_test_mode, true);
+  assert.equal(call.args.p_test_mode, false);
+  assert.equal(call.args.p_product_name, 'CareFlow AI Clinic Subscription');
   assert.equal(call.args.card_number, undefined);
 });
 
-test('webhook rejects the wrong store, wrong mode and mismatched event name', async () => {
-  for (const [payload, header] of [
-    [subscriptionPayload({ store_id: 999 }), 'subscription_created'],
-    [subscriptionPayload({ test_mode: false }), 'subscription_created'],
-    [subscriptionPayload(), 'subscription_cancelled'],
-  ]) {
-    const fixture = webhookFixture();
-    assert.equal((await fixture.invoke(payload, header)).status, 400);
-    assert.equal(fixture.calls.rpcs.length, 0);
-  }
+test('canceled subscriptions expire and unrelated Paddle prices are ignored', async () => {
+  const canceled = webhookFixture();
+  const canceledPayload = subscriptionPayload({
+    event_type: 'subscription.canceled',
+    data: {
+      status: 'canceled',
+      canceled_at: '2026-09-20T10:00:00Z',
+      updated_at: '2026-09-20T10:00:00Z',
+    },
+  });
+  assert.equal((await canceled.invoke(canceledPayload)).status, 200);
+  assert.equal(canceled.calls.rpcs[0].args.p_status, 'expired');
+  assert.equal(canceled.calls.rpcs[0].args.p_ends_at, '2026-09-20T10:00:00.000Z');
+
+  const unrelated = webhookFixture();
+  const unrelatedPayload = subscriptionPayload({
+    data: {
+      items: [{
+        price: { id: 'pri_01h22222222222222222222222', name: 'Other' },
+        product: { name: 'Other product' },
+      }],
+    },
+  });
+  const ignored = await unrelated.invoke(unrelatedPayload);
+  assert.equal(ignored.status, 200);
+  assert.equal(ignored.body.ignored, true);
+  assert.equal(unrelated.calls.rpcs.length, 0);
 });

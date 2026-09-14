@@ -1,22 +1,36 @@
-# CareFlow billing activation
+# CareFlow Paddle billing activation
 
-The repository contains the secure Lemon Squeezy checkout and webhook foundation. Keep it in test mode until the store is approved and a complete synthetic payment test passes.
+The application uses Paddle Billing for the live **CareFlow AI Clinic Subscription** at **$99 USD per month**.
 
-## Owner-only setup
+Public values used by the browser:
 
-1. Create and activate a Lemon Squeezy store for the **CareFlow AI SaaS subscription**. Do not describe it as consulting or another service.
-2. Complete identity verification and add the Turkish bank account inside Lemon Squeezy. Never put identity documents, bank details, or API keys in GitHub.
-3. Create one monthly subscription product/variant for the paid pilot.
-4. In Supabase Edge Function Secrets, set:
-   - `LEMONSQUEEZY_API_KEY`
-   - `LEMONSQUEEZY_STORE_ID`
-   - `LEMONSQUEEZY_VARIANT_ID`
-   - `LEMONSQUEEZY_WEBHOOK_SECRET`
-   - `LEMONSQUEEZY_TEST_MODE=true`
-5. Configure the webhook URL as:
+- Client-side token: `live_30378679accd73c018c6de9b176`
+- Price ID: `pri_01m2gcpjxz4wqjft7z10zcz3zq`
+
+The client-side token and price ID identify checkout configuration; they are not private API keys. Never place a Paddle API key, webhook secret, bank information, or identity document in the website or GitHub.
+
+## Final owner setup
+
+1. In Paddle, open **Developer tools → Notifications → New destination**.
+2. Name it **CareFlow AI live billing**.
+3. Enter this webhook URL:
+
    `https://qyrxexraolqyymyozrtl.supabase.co/functions/v1/billing-webhook`
-6. Subscribe the webhook to subscription created, updated, cancelled, resumed, expired, paused, and unpaused events.
-7. Run a synthetic test-mode checkout and verify one organization subscription row is created.
-8. Only after the test passes, switch the Lemon Squeezy store and `LEMONSQUEEZY_TEST_MODE` to live mode.
 
-Lemon Squeezy receives the customer's payment information. CareFlow stores only provider IDs, subscription status, and renewal dates.
+4. Subscribe the destination to:
+   - `subscription.created`
+   - `subscription.activated`
+   - `subscription.updated`
+   - `subscription.trialing`
+   - `subscription.past_due`
+   - `subscription.paused`
+   - `subscription.resumed`
+   - `subscription.canceled`
+5. Save the destination and copy its **Secret key**.
+6. In Supabase, open **Edge Functions → Secrets** and add:
+   - Name: `PADDLE_WEBHOOK_SECRET`
+   - Value: the Paddle notification destination secret
+7. Send a Paddle test notification and confirm it returns HTTP 200.
+8. Sign in to CareFlow as a clinic admin, open **Billing**, and run one controlled live checkout.
+
+CareFlow stores only Paddle customer, subscription and price identifiers, subscription status, renewal dates, and a short-lived one-time checkout reference. Paddle handles customers' payment details and applicable sales tax as Merchant of Record.

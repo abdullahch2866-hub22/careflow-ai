@@ -282,6 +282,7 @@
   </style>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
   <link rel="stylesheet" href="redesign.css">
 
 </head>
@@ -553,7 +554,7 @@
             <span id="billingStatusBadge" class="status" data-billing-status="none">Not connected</span>
           </div>
           <div class="settings-grid billing-details-grid">
-            <div class="settings-card"><div class="settings-label">Payment provider</div><div class="settings-value">Lemon Squeezy</div></div>
+            <div class="settings-card"><div class="settings-label">Payment provider</div><div class="settings-value">Paddle</div></div>
             <div class="settings-card"><div class="settings-label">Next billing date</div><div id="billingRenewal" class="settings-value">—</div></div>
             <div class="settings-card"><div class="settings-label">Payment mode</div><div id="billingMode" class="settings-value">Secure checkout</div></div>
           </div>
@@ -713,9 +714,12 @@ Request Correction
 const SUPABASE_URL = "https://qyrxexraolqyymyozrtl.supabase.co";
 const SUPABASE_KEY = "sb_publishable_ucOmAjy6eXWdy-OPr9qCrQ_HkceYeN8";
 const CAREFLOW_APP_URL = "https://abdullahch2866-hub22.github.io/careflow-ai/";
+const PADDLE_CLIENT_TOKEN = "live_30378679accd73c018c6de9b176";
+const PADDLE_PRICE_ID = "pri_01m2gcpjxz4wqjft7z10zcz3zq";
 const careflowLocation = (typeof window !== "undefined" && window.location) ? window.location : { hash: "", search: "" };
 let recoveryFlowRequested = (careflowLocation.hash || "").includes("type=recovery") || new URLSearchParams(careflowLocation.search || "").get("type") === "recovery";
 let billingReturnRequested = (careflowLocation.hash || "").includes("billing=success");
+let billingViewRequested = (careflowLocation.hash || "") === "#billing" || billingReturnRequested;
 let passwordFlowMode = null;
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const CASE_COLUMNS = "id, document_id, organization_id, file_name, document_type, status, created_at, patient_name, document_date, insurance_information, missing_information, review_notes, review_revision, review_confirmed, updated_at, updated_by, processing_status, processing_error_code, processing_error_message, processing_attempts, processing_started_at, processing_completed_at, processing_retryable";
@@ -761,6 +765,7 @@ let billingSubscription = null;
 let loadingBilling = false;
 let billingRequest = 0;
 let billingCheckoutPending = false;
+let paddleInitialized = false;
 let activeView = "dashboard";
 let editing = false;
 let sourceViewerLoading = false;
@@ -1201,7 +1206,7 @@ function renderBilling() {
   const status = billingSubscription?.status || "none";
   const badge = document.getElementById("billingStatusBadge");
   const planParts = [billingSubscription?.product_name, billingSubscription?.variant_name].filter(Boolean);
-  document.getElementById("billingPlan").textContent = planParts.join(" · ") || "CareFlow AI subscription";
+  document.getElementById("billingPlan").textContent = planParts.join(" · ") || "CareFlow AI Clinic Subscription · $99/month";
   document.getElementById("billingRenewal").textContent = formatWorkspaceDate(
     status === "cancelled" || status === "expired" ? billingSubscription?.ends_at : billingSubscription?.renews_at
   );
@@ -1276,12 +1281,30 @@ async function openBillingCheckout() {
       throw new Error(details);
     }
     if (requestedOrganization !== organizationId) return false;
-    const checkoutUrl = new URL(data?.checkout_url || "");
-    if (checkoutUrl.protocol !== "https:" ||
-        !(checkoutUrl.hostname === "lemonsqueezy.com" || checkoutUrl.hostname.endsWith(".lemonsqueezy.com"))) {
-      throw new Error("The payment provider returned an invalid checkout link.");
+    const checkoutReference = data?.checkout_reference;
+    if (data?.price_id !== PADDLE_PRICE_ID ||
+        typeof checkoutReference !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(checkoutReference)) {
+      throw new Error("The payment provider returned invalid checkout details.");
     }
-    window.location.assign(checkoutUrl.href);
+    if (!initializePaddle()) {
+      throw new Error("Secure checkout could not load. Refresh the page and try again.");
+    }
+    const checkoutOptions = {
+      items: [{ priceId: PADDLE_PRICE_ID, quantity: 1 }],
+      customData: { careflow_checkout_reference: checkoutReference },
+      settings: {
+        displayMode: "overlay",
+        theme: "light",
+        locale: "en",
+        successUrl: CAREFLOW_APP_URL + "#billing=success"
+      }
+    };
+    if (typeof data?.customer_email === "string" && data.customer_email.includes("@")) {
+      checkoutOptions.customer = { email: data.customer_email };
+    }
+    window.Paddle.Checkout.open(checkoutOptions);
+    status.textContent = "Secure Paddle checkout opened.";
     return true;
   } catch (error) {
     if (requestedOrganization === organizationId) {
@@ -1293,6 +1316,30 @@ async function openBillingCheckout() {
     updateControls();
   }
 }
+
+function initializePaddle() {
+  if (paddleInitialized) return true;
+  if (!window.Paddle || typeof window.Paddle.Initialize !== "function") return false;
+  try {
+    window.Paddle.Initialize({
+      token: PADDLE_CLIENT_TOKEN,
+      eventCallback: function(event) {
+        if (event?.name !== "checkout.completed") return;
+        billingReturnRequested = true;
+        const status = document.getElementById("billingStatus");
+        if (status) status.textContent = "Payment completed. Confirming your subscription securely...";
+        setTimeout(loadBilling, 2000);
+      }
+    });
+    paddleInitialized = true;
+    return true;
+  } catch (error) {
+    console.error("Paddle initialization failed", error);
+    return false;
+  }
+}
+
+initializePaddle();
 
 async function loadOrganizationSettings() {
   if (!organizationId) return false;
@@ -2013,7 +2060,7 @@ async function updateAuthUI() {
     currentAuthUserId = user.id;
     setSignupPanelVisible(false);
     const restoreState = readWorkspaceState(user.id);
-    activeView = billingReturnRequested ? "billing" : restoreState?.view || "dashboard";
+    activeView = billingViewRequested ? "billing" : restoreState?.view || "dashboard";
     renderWorkspaceView();
     document.getElementById("currentUserEmail").textContent = user.email || "Signed in";
     const invitedNeedsPassword = !!user.user_metadata?.careflow_invited_organization && user.user_metadata?.careflow_password_set !== true;

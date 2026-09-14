@@ -2,18 +2,19 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.57.4";
 
 const MAX_WEBHOOK_BYTES = 1024 * 1024;
+const SIGNATURE_TOLERANCE_SECONDS = 300;
+const PADDLE_PRICE_ID = "pri_01m2gcpjxz4wqjft7z10zcz3zq";
 const SUPPORTED_EVENTS = new Set([
-  "subscription_created",
-  "subscription_updated",
-  "subscription_cancelled",
-  "subscription_resumed",
-  "subscription_expired",
-  "subscription_paused",
-  "subscription_unpaused",
+  "subscription.created",
+  "subscription.activated",
+  "subscription.updated",
+  "subscription.trialing",
+  "subscription.past_due",
+  "subscription.paused",
+  "subscription.resumed",
+  "subscription.canceled",
 ]);
-const SUBSCRIPTION_STATUSES = new Set([
-  "on_trial", "active", "paused", "past_due", "unpaid", "cancelled", "expired",
-]);
+const PADDLE_STATUSES = new Set(["active", "canceled", "past_due", "paused", "trialing"]);
 
 function constantTimeEqual(left: string, right: string) {
   if (left.length !== right.length) return false;
@@ -37,18 +38,27 @@ async function hmacSha256Hex(secret: string, body: string) {
   return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function sha256Hex(body: string) {
-  const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body)));
-  return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+function parsePaddleSignature(value: string) {
+  let timestamp = "";
+  const signatures: string[] = [];
+  for (const part of value.split(";")) {
+    const separator = part.indexOf("=");
+    if (separator < 1) continue;
+    const key = part.slice(0, separator).trim();
+    const item = part.slice(separator + 1).trim().toLowerCase();
+    if (key === "ts" && /^[0-9]+$/.test(item)) timestamp = item;
+    if (key === "h1" && /^[0-9a-f]{64}$/.test(item)) signatures.push(item);
+  }
+  return { timestamp, signatures };
+}
+
+function paddleId(value: unknown, prefix: "evt" | "ctm" | "sub" | "pri") {
+  return typeof value === "string" && new RegExp(`^${prefix}_[a-z0-9]{26}$`).test(value) ? value : "";
 }
 
 function isUuid(value: unknown) {
-  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
-function numericId(value: unknown) {
-  const normalized = typeof value === "number" ? String(value) : value;
-  return typeof normalized === "string" && /^[0-9]+$/.test(normalized) ? normalized : "";
+  return typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function timestampOrNull(value: unknown) {
@@ -57,19 +67,32 @@ function timestampOrNull(value: unknown) {
   return new Date(value).toISOString();
 }
 
+function internalStatus(value: string) {
+  const statusByPaddleStatus: Record<string, string> = {
+    active: "active",
+    canceled: "expired",
+    past_due: "past_due",
+    paused: "paused",
+    trialing: "on_trial",
+  };
+  return statusByPaddleStatus[value] || "";
+}
+
+function safeName(value: unknown, fallback: string) {
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, 200) : fallback;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  const secret = Deno.env.get("LEMONSQUEEZY_WEBHOOK_SECRET") || "";
-  const expectedStoreId = numericId(Deno.env.get("LEMONSQUEEZY_STORE_ID"));
-  const expectedTestMode = (Deno.env.get("LEMONSQUEEZY_TEST_MODE") || "true").toLowerCase() !== "false";
+  const secret = Deno.env.get("PADDLE_WEBHOOK_SECRET") || "";
   const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-
-  if (!secret || !expectedStoreId || !supabaseUrl || !serviceRoleKey) {
-    console.error("Billing webhook is not configured");
+  const testMode = (Deno.env.get("PADDLE_ENVIRONMENT") || "live").toLowerCase() === "sandbox";
+  if (!secret || !supabaseUrl || !serviceRoleKey) {
+    console.error("Paddle billing webhook is not configured");
     return Response.json({ error: "Webhook unavailable" }, { status: 503 });
   }
 
@@ -83,53 +106,62 @@ Deno.serve(async (req: Request) => {
     return Response.json({ error: "Payload too large" }, { status: 413 });
   }
 
-  const suppliedSignature = (req.headers.get("X-Signature") || "").toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(suppliedSignature)) {
+  const { timestamp, signatures } = parsePaddleSignature(req.headers.get("Paddle-Signature") || "");
+  const timestampNumber = Number(timestamp);
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (!Number.isSafeInteger(timestampNumber) || timestampNumber <= 0 || signatures.length === 0 ||
+      Math.abs(nowSeconds - timestampNumber) > SIGNATURE_TOLERANCE_SECONDS) {
     return Response.json({ error: "Invalid signature" }, { status: 401 });
   }
-  const expectedSignature = await hmacSha256Hex(secret, rawBody);
-  if (!constantTimeEqual(suppliedSignature, expectedSignature)) {
+
+  const expectedSignature = await hmacSha256Hex(secret, `${timestamp}:${rawBody}`);
+  if (!signatures.some(signature => constantTimeEqual(signature, expectedSignature))) {
     return Response.json({ error: "Invalid signature" }, { status: 401 });
   }
 
   let payload: any;
-  try { payload = JSON.parse(rawBody); } catch (_) {
+  try {
+    payload = JSON.parse(rawBody);
+  } catch (_) {
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const headerEvent = req.headers.get("X-Event-Name") || "";
-  const eventName = payload?.meta?.event_name;
-  if (typeof eventName !== "string" || eventName !== headerEvent) {
-    return Response.json({ error: "Event name mismatch" }, { status: 400 });
-  }
-  if (!SUPPORTED_EVENTS.has(eventName)) {
+  const eventType = payload?.event_type;
+  if (typeof eventType !== "string" || !SUPPORTED_EVENTS.has(eventType)) {
     return Response.json({ received: true, ignored: true });
   }
 
-  const attributes = payload?.data?.attributes;
-  const organizationId = payload?.meta?.custom_data?.organization_id;
-  const subscriptionId = numericId(payload?.data?.id);
-  const storeId = numericId(attributes?.store_id);
-  const customerId = numericId(attributes?.customer_id);
-  const variantId = numericId(attributes?.variant_id);
-  const status = attributes?.status;
-  const testMode = attributes?.test_mode;
-
-  if (payload?.data?.type !== "subscriptions" || !isUuid(organizationId) ||
-      !subscriptionId || !storeId || !customerId || !variantId ||
-      !SUBSCRIPTION_STATUSES.has(status) || storeId !== expectedStoreId ||
-      typeof testMode !== "boolean" ||
-      testMode !== expectedTestMode) {
+  const eventId = paddleId(payload?.event_id, "evt");
+  const data = payload?.data;
+  const subscriptionId = paddleId(data?.id, "sub");
+  const customerId = paddleId(data?.customer_id, "ctm");
+  const paddleStatus = data?.status;
+  if (!eventId || !subscriptionId || !customerId || !PADDLE_STATUSES.has(paddleStatus)) {
     return Response.json({ error: "Invalid subscription event" }, { status: 400 });
   }
 
+  const matchingItem = Array.isArray(data?.items)
+    ? data.items.find((item: any) => paddleId(item?.price?.id, "pri") === PADDLE_PRICE_ID)
+    : null;
+  if (!matchingItem) {
+    return Response.json({ received: true, ignored: true });
+  }
+
+  const customReference = data?.custom_data?.careflow_checkout_reference;
+  const checkoutReference = isUuid(customReference) ? customReference : null;
   let renewsAt: string | null;
   let endsAt: string | null;
   let providerUpdatedAt: string | null;
   try {
-    renewsAt = timestampOrNull(attributes?.renews_at);
-    endsAt = timestampOrNull(attributes?.ends_at);
-    providerUpdatedAt = timestampOrNull(attributes?.updated_at);
+    renewsAt = timestampOrNull(data?.next_billed_at);
+    const scheduledCancellation = data?.scheduled_change?.action === "cancel"
+      ? data?.scheduled_change?.effective_at
+      : null;
+    endsAt = timestampOrNull(
+      scheduledCancellation ||
+      (paddleStatus === "canceled" ? data?.canceled_at || data?.current_billing_period?.ends_at : null)
+    );
+    providerUpdatedAt = timestampOrNull(data?.updated_at || payload?.occurred_at);
   } catch (_) {
     return Response.json({ error: "Invalid subscription timestamp" }, { status: 400 });
   }
@@ -137,22 +169,19 @@ Deno.serve(async (req: Request) => {
     return Response.json({ error: "Missing subscription timestamp" }, { status: 400 });
   }
 
-  const eventId = `${eventName}:${await sha256Hex(rawBody)}`;
   const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-
-  const { data, error } = await supabaseAdmin.rpc("careflow_service_apply_billing_event", {
+  const { data: result, error } = await supabaseAdmin.rpc("careflow_service_apply_paddle_event", {
     p_event_id: eventId,
-    p_event_name: eventName,
-    p_organization_id: organizationId,
-    p_store_id: storeId,
+    p_event_name: eventType,
+    p_checkout_reference: checkoutReference,
     p_customer_id: customerId,
     p_subscription_id: subscriptionId,
-    p_variant_id: variantId,
-    p_product_name: typeof attributes?.product_name === "string" ? attributes.product_name : "",
-    p_variant_name: typeof attributes?.variant_name === "string" ? attributes.variant_name : "",
-    p_status: status,
+    p_price_id: PADDLE_PRICE_ID,
+    p_product_name: safeName(matchingItem?.product?.name, "CareFlow AI Clinic Subscription"),
+    p_price_name: safeName(matchingItem?.price?.name || matchingItem?.price?.description, "Monthly"),
+    p_status: internalStatus(paddleStatus),
     p_renews_at: renewsAt,
     p_ends_at: endsAt,
     p_provider_updated_at: providerUpdatedAt,
@@ -160,9 +189,9 @@ Deno.serve(async (req: Request) => {
   });
 
   if (error) {
-    console.error("Billing webhook database update failed", { code: error.code });
+    console.error("Paddle webhook database update failed", { code: error.code });
     return Response.json({ error: "Could not record billing event" }, { status: 500 });
   }
 
-  return Response.json({ received: true, result: data });
+  return Response.json({ received: true, result });
 });
