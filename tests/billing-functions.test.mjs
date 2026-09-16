@@ -212,6 +212,18 @@ test('webhook rejects forged and stale signatures before any database call', asy
   assert.equal(stale.calls.rpcs.length, 0);
 });
 
+test('signed Paddle simulations are acknowledged without changing production billing', async () => {
+  const fixture = webhookFixture();
+  const response = await fixture.invoke(subscriptionPayload({
+    event_id: 'ntfsimevt_01j82zmtn7h400gg6pa3q3kx73',
+  }));
+  assert.equal(response.status, 200);
+  assert.equal(response.body.received, true);
+  assert.equal(response.body.simulated, true);
+  assert.equal(response.body.ignored, true);
+  assert.equal(fixture.calls.rpcs.length, 0);
+});
+
 test('a valid Paddle subscription event is reduced to safe billing fields', async () => {
   const fixture = webhookFixture();
   const response = await fixture.invoke(subscriptionPayload());

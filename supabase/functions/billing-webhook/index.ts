@@ -56,6 +56,10 @@ function paddleId(value: unknown, prefix: "evt" | "ctm" | "sub" | "pri") {
   return typeof value === "string" && new RegExp(`^${prefix}_[a-z0-9]{26}$`).test(value) ? value : "";
 }
 
+function isSimulationEventId(value: unknown) {
+  return typeof value === "string" && /^ntfsimevt_[a-z0-9]{26}$/.test(value);
+}
+
 function isUuid(value: unknown) {
   return typeof value === "string" &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -129,6 +133,13 @@ Deno.serve(async (req: Request) => {
   const eventType = payload?.event_type;
   if (typeof eventType !== "string" || !SUPPORTED_EVENTS.has(eventType)) {
     return Response.json({ received: true, ignored: true });
+  }
+
+  // Paddle's simulator signs requests normally, but uses ntfsimevt_ IDs and
+  // sample catalog data. Acknowledge these only after signature verification;
+  // never write simulated subscription state into the production database.
+  if (isSimulationEventId(payload?.event_id)) {
+    return Response.json({ received: true, simulated: true, ignored: true });
   }
 
   const eventId = paddleId(payload?.event_id, "evt");
