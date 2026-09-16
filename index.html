@@ -1303,8 +1303,8 @@ async function openBillingCheckout() {
     if (typeof data?.customer_email === "string" && data.customer_email.includes("@")) {
       checkoutOptions.customer = { email: data.customer_email };
     }
+    status.textContent = "Opening secure Paddle checkout...";
     window.Paddle.Checkout.open(checkoutOptions);
-    status.textContent = "Secure Paddle checkout opened.";
     return true;
   } catch (error) {
     if (requestedOrganization === organizationId) {
@@ -1324,9 +1324,26 @@ function initializePaddle() {
     window.Paddle.Initialize({
       token: PADDLE_CLIENT_TOKEN,
       eventCallback: function(event) {
+        const status = document.getElementById("billingStatus");
+        if (event?.name === "checkout.loaded") {
+          if (status) status.textContent = "Secure Paddle checkout opened.";
+          return;
+        }
+        if (event?.name === "checkout.error") {
+          console.error("Paddle checkout error", {
+            type: event.type || "unknown",
+            code: event.code || "unknown",
+            detail: event.detail || "No details provided"
+          });
+          if (status) status.textContent = "Secure checkout could not open. Refresh the page and try again.";
+          return;
+        }
+        if (event?.name === "checkout.closed") {
+          if (status && !billingReturnRequested) status.textContent = "Secure checkout closed. No payment was made.";
+          return;
+        }
         if (event?.name !== "checkout.completed") return;
         billingReturnRequested = true;
-        const status = document.getElementById("billingStatus");
         if (status) status.textContent = "Payment completed. Confirming your subscription securely...";
         setTimeout(loadBilling, 2000);
       }

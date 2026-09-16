@@ -81,6 +81,10 @@ test('workspace opens only the fixed Paddle price through the protected checkout
   assert.match(html, /Paddle\.Checkout\.open\(checkoutOptions\)/);
   assert.match(html, /items: \[\{ priceId: PADDLE_PRICE_ID, quantity: 1 \}\]/);
   assert.match(html, /customData: \{ careflow_checkout_reference: checkoutReference \}/);
+  assert.match(html, /event\?\.name === "checkout\.loaded"[\s\S]*Secure Paddle checkout opened\./);
+  assert.match(html, /event\?\.name === "checkout\.error"[\s\S]*Secure checkout could not open\./);
+  assert.match(html, /event\?\.name === "checkout\.closed"[\s\S]*Secure checkout closed\. No payment was made\./);
+  assert.match(html, /Opening secure Paddle checkout[\s\S]*Paddle\.Checkout\.open\(checkoutOptions\)/);
   assert.doesNotMatch(html, /PADDLE_(API_KEY|WEBHOOK_SECRET)/);
   assert.match(pricing, /\$99[\s\S]*USD \/ month/);
   assert.match(pricing, /cdn\.paddle\.com\/paddle\/v2\/paddle\.js/);
