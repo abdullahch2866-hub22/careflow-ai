@@ -172,7 +172,10 @@ begin
     raise exception 'Service role required.' using errcode = '42501';
   end if;
 
-  if p_price_id <> 'pri_01m2gcpjxz4wqjft7z10zcz3zq' then
+  if coalesce(p_price_id, '') not in (
+    'pri_01m2gcpjxz4wqjft7z10zcz3zq',
+    'pri_01m2xtx7y26neywx40s3v3s5k3'
+  ) then
     raise exception 'Invalid billing price.' using errcode = '22023';
   end if;
 
@@ -274,7 +277,11 @@ begin
      )
      or coalesce(p_customer_id, '') !~ '^ctm_[a-z0-9]{26}$'
      or coalesce(p_subscription_id, '') !~ '^sub_[a-z0-9]{26}$'
-     or p_price_id <> 'pri_01m2gcpjxz4wqjft7z10zcz3zq'
+     or not (
+       (p_price_id = 'pri_01m2gcpjxz4wqjft7z10zcz3zq' and p_test_mode is false)
+       or
+       (p_price_id = 'pri_01m2xtx7y26neywx40s3v3s5k3' and p_test_mode is true)
+     )
      or coalesce(p_status, '') not in ('on_trial', 'active', 'paused', 'past_due', 'expired')
      or p_provider_updated_at is null then
     raise exception 'Invalid Paddle billing event.' using errcode = '22023';

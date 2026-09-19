@@ -716,7 +716,23 @@ const SUPABASE_KEY = "sb_publishable_ucOmAjy6eXWdy-OPr9qCrQ_HkceYeN8";
 const CAREFLOW_APP_URL = "https://abdullahch2866-hub22.github.io/careflow-ai/";
 const PADDLE_CLIENT_TOKEN = "live_30378679accd73c018c6de9b176";
 const PADDLE_PRICE_ID = "pri_01m2gcpjxz4wqjft7z10zcz3zq";
+const PADDLE_SANDBOX_CLIENT_TOKEN = "test_fb2fffc73e4082c03cd98733a95";
+const PADDLE_SANDBOX_PRICE_ID = "pri_01m2xtx7y26neywx40s3v3s5k3";
 const careflowLocation = (typeof window !== "undefined" && window.location) ? window.location : { hash: "", search: "" };
+const billingSandboxRequested = new URLSearchParams(careflowLocation.search || "").get("billing_test") === "sandbox";
+const paddleBillingConfig = billingSandboxRequested ? {
+  environment: "sandbox",
+  clientToken: PADDLE_SANDBOX_CLIENT_TOKEN,
+  priceId: PADDLE_SANDBOX_PRICE_ID,
+  checkoutFunction: "create-billing-checkout-sandbox",
+  successUrl: CAREFLOW_APP_URL + "?billing_test=sandbox#billing=success"
+} : {
+  environment: "live",
+  clientToken: PADDLE_CLIENT_TOKEN,
+  priceId: PADDLE_PRICE_ID,
+  checkoutFunction: "create-billing-checkout",
+  successUrl: CAREFLOW_APP_URL + "#billing=success"
+};
 let recoveryFlowRequested = (careflowLocation.hash || "").includes("type=recovery") || new URLSearchParams(careflowLocation.search || "").get("type") === "recovery";
 let billingReturnRequested = (careflowLocation.hash || "").includes("billing=success");
 let billingViewRequested = (careflowLocation.hash || "") === "#billing" || billingReturnRequested;
@@ -1210,7 +1226,7 @@ function renderBilling() {
   document.getElementById("billingRenewal").textContent = formatWorkspaceDate(
     status === "cancelled" || status === "expired" ? billingSubscription?.ends_at : billingSubscription?.renews_at
   );
-  document.getElementById("billingMode").textContent = billingSubscription?.test_mode ? "Test payment" : "Secure checkout";
+  document.getElementById("billingMode").textContent = billingSubscription?.test_mode || billingSandboxRequested ? "Test payment" : "Secure checkout";
   badge.textContent = billingStatusLabel(status);
   badge.dataset.billingStatus = status;
   const checkout = document.getElementById("billingCheckoutBtn");
@@ -1269,7 +1285,7 @@ async function openBillingCheckout() {
   status.textContent = "Preparing secure checkout...";
   updateControls();
   try {
-    const { data, error } = await supabaseClient.functions.invoke("create-billing-checkout", { body: {} });
+    const { data, error } = await supabaseClient.functions.invoke(paddleBillingConfig.checkoutFunction, { body: {} });
     if (error) {
       let details = error.message || "Checkout could not be prepared.";
       try {
@@ -1282,7 +1298,8 @@ async function openBillingCheckout() {
     }
     if (requestedOrganization !== organizationId) return false;
     const checkoutReference = data?.checkout_reference;
-    if (data?.price_id !== PADDLE_PRICE_ID ||
+    if (data?.price_id !== paddleBillingConfig.priceId ||
+        (data?.environment && data.environment !== paddleBillingConfig.environment) ||
         typeof checkoutReference !== "string" ||
         !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(checkoutReference)) {
       throw new Error("The payment provider returned invalid checkout details.");
@@ -1291,13 +1308,13 @@ async function openBillingCheckout() {
       throw new Error("Secure checkout could not load. Refresh the page and try again.");
     }
     const checkoutOptions = {
-      items: [{ priceId: PADDLE_PRICE_ID, quantity: 1 }],
+      items: [{ priceId: paddleBillingConfig.priceId, quantity: 1 }],
       customData: { careflow_checkout_reference: checkoutReference },
       settings: {
         displayMode: "overlay",
         theme: "light",
         locale: "en",
-        successUrl: CAREFLOW_APP_URL + "#billing=success"
+        successUrl: paddleBillingConfig.successUrl
       }
     };
     if (typeof data?.customer_email === "string" && data.customer_email.includes("@")) {
@@ -1321,8 +1338,12 @@ function initializePaddle() {
   if (paddleInitialized) return true;
   if (!window.Paddle || typeof window.Paddle.Initialize !== "function") return false;
   try {
+    if (paddleBillingConfig.environment === "sandbox") {
+      if (!window.Paddle.Environment || typeof window.Paddle.Environment.set !== "function") return false;
+      window.Paddle.Environment.set("sandbox");
+    }
     window.Paddle.Initialize({
-      token: PADDLE_CLIENT_TOKEN,
+      token: paddleBillingConfig.clientToken,
       eventCallback: function(event) {
         const status = document.getElementById("billingStatus");
         if (event?.name === "checkout.loaded") {

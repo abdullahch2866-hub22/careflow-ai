@@ -5,7 +5,9 @@ import fs from 'node:fs';
 
 const sql = fs.readFileSync(new URL('../supabase/billing-foundation.sql', import.meta.url), 'utf8');
 const checkout = fs.readFileSync(new URL('../supabase/functions/create-billing-checkout/index.ts', import.meta.url), 'utf8');
+const sandboxCheckout = fs.readFileSync(new URL('../supabase/functions/create-billing-checkout-sandbox/index.ts', import.meta.url), 'utf8');
 const webhook = fs.readFileSync(new URL('../supabase/functions/billing-webhook/index.ts', import.meta.url), 'utf8');
+const sandboxWebhook = fs.readFileSync(new URL('../supabase/functions/billing-webhook-sandbox/index.ts', import.meta.url), 'utf8');
 const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const pricing = fs.readFileSync(new URL('../pricing.html', import.meta.url), 'utf8');
 
@@ -38,20 +40,35 @@ test('checkout is authenticated, admin-only, rate-limited and bound to a one-tim
   assert.match(checkout, /Deno\.env\.get\("PADDLE_WEBHOOK_SECRET"\)/);
   assert.doesNotMatch(checkout, /PADDLE_API_KEY/);
   assert.doesNotMatch(checkout, /fetch\s*\(/);
-  assert.match(sql, /p_price_id <> 'pri_01m2gcpjxz4wqjft7z10zcz3zq'/);
+  assert.match(sql, /p_price_id = 'pri_01m2gcpjxz4wqjft7z10zcz3zq' and p_test_mode is false/i);
+  assert.match(sql, /p_price_id = 'pri_01m2xtx7y26neywx40s3v3s5k3' and p_test_mode is true/i);
   assert.match(sql, /requested_at >= clock_timestamp\(\) - interval '15 minutes'/);
 });
 
-test('webhook verifies Paddle raw-body signatures before parsing and rejects replay', () => {
-  const bodyRead = webhook.indexOf('const rawBody = await req.text()');
-  const signatureCheck = webhook.indexOf('constantTimeEqual(signature, expectedSignature)');
-  const jsonParse = webhook.indexOf('payload = JSON.parse(rawBody)');
-  assert.ok(bodyRead > -1 && signatureCheck > bodyRead && jsonParse > signatureCheck);
-  assert.match(webhook, /crypto\.subtle\.importKey\([\s\S]*"HMAC"[\s\S]*"SHA-256"/);
-  assert.match(webhook, /Paddle-Signature/);
-  assert.match(webhook, /\$\{timestamp\}:\$\{rawBody\}/);
-  assert.match(webhook, /SIGNATURE_TOLERANCE_SECONDS/);
-  assert.match(webhook, /MAX_WEBHOOK_BYTES/);
+test('Sandbox checkout is fixed to the designated test identity and Sandbox price', () => {
+  assert.match(sandboxCheckout, /withSupabase\(\{ auth: "user" \}/);
+  assert.match(sandboxCheckout, /SANDBOX_TEST_USER_ID = "5ebb6f53-f8b6-464d-af65-c19fa3a28e85"/);
+  assert.match(sandboxCheckout, /SANDBOX_TEST_EMAIL = "careflow\.test@example\.com"/);
+  assert.match(sandboxCheckout, /PADDLE_PRICE_ID = "pri_01m2xtx7y26neywx40s3v3s5k3"/);
+  assert.match(sandboxCheckout, /Deno\.env\.get\("PADDLE_SANDBOX_WEBHOOK_SECRET"\)/);
+  assert.match(sandboxCheckout, /membership\.role !== "admin"/);
+  assert.doesNotMatch(sandboxCheckout, /PADDLE_API_KEY|fetch\s*\(/);
+});
+
+test('webhooks verify Paddle raw-body signatures before parsing and reject replay', () => {
+  for (const source of [webhook, sandboxWebhook]) {
+    const bodyRead = source.indexOf('const rawBody = await req.text()');
+    const signatureCheck = source.indexOf('constantTimeEqual(signature, expectedSignature)');
+    const jsonParse = source.indexOf('payload = JSON.parse(rawBody)');
+    assert.ok(bodyRead > -1 && signatureCheck > bodyRead && jsonParse > signatureCheck);
+    assert.match(source, /crypto\.subtle\.importKey\([\s\S]*"HMAC"[\s\S]*"SHA-256"/);
+    assert.match(source, /Paddle-Signature/);
+    assert.match(source, /\$\{timestamp\}:\$\{rawBody\}/);
+    assert.match(source, /SIGNATURE_TOLERANCE_SECONDS/);
+    assert.match(source, /MAX_WEBHOOK_BYTES/);
+  }
+  assert.match(sandboxWebhook, /Deno\.env\.get\("PADDLE_SANDBOX_WEBHOOK_SECRET"\)/);
+  assert.match(sandboxWebhook, /p_test_mode: true/);
 });
 
 test('billing events are idempotent, nonce-bound and stale updates cannot overwrite newer state', () => {
@@ -77,10 +94,20 @@ test('only the service role can invoke billing mutation functions', () => {
 test('workspace opens only the fixed Paddle price through the protected checkout function', () => {
   assert.match(html, /id="navBilling"[\s\S]*data-view="billing"/);
   assert.match(html, /from\("organization_subscriptions"\)[\s\S]*eq\("organization_id", requestedOrganization\)/);
-  assert.match(html, /functions\.invoke\("create-billing-checkout", \{ body: \{\} \}\)/);
+  assert.match(html, /checkoutFunction: "create-billing-checkout"/);
+  assert.match(html, /checkoutFunction: "create-billing-checkout-sandbox"/);
+  assert.match(html, /functions\.invoke\(paddleBillingConfig\.checkoutFunction, \{ body: \{\} \}\)/);
   assert.match(html, /Paddle\.Checkout\.open\(checkoutOptions\)/);
-  assert.match(html, /items: \[\{ priceId: PADDLE_PRICE_ID, quantity: 1 \}\]/);
+  assert.match(html, /items: \[\{ priceId: paddleBillingConfig\.priceId, quantity: 1 \}\]/);
   assert.match(html, /customData: \{ careflow_checkout_reference: checkoutReference \}/);
+  assert.match(html, /PADDLE_CLIENT_TOKEN = "live_30378679accd73c018c6de9b176"/);
+  assert.match(html, /PADDLE_SANDBOX_CLIENT_TOKEN = "test_fb2fffc73e4082c03cd98733a95"/);
+  assert.match(html, /PADDLE_SANDBOX_PRICE_ID = "pri_01m2xtx7y26neywx40s3v3s5k3"/);
+  assert.match(html, /Paddle\.Environment\.set\("sandbox"\)/);
+  assert.ok(
+    html.indexOf('window.Paddle.Environment.set("sandbox")') < html.indexOf('window.Paddle.Initialize({'),
+    'Paddle Sandbox mode must be selected before Paddle initializes'
+  );
   assert.match(html, /event\?\.name === "checkout\.loaded"[\s\S]*Secure Paddle checkout opened\./);
   assert.match(html, /event\?\.name === "checkout\.error"[\s\S]*Secure checkout could not open\./);
   assert.match(html, /event\?\.name === "checkout\.closed"[\s\S]*Secure checkout closed\. No payment was made\./);

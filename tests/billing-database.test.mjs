@@ -9,6 +9,9 @@ const migration = fs.readFileSync(new URL('../supabase/billing-foundation.sql', 
 const organizationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const userId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const priceId = 'pri_01m2gcpjxz4wqjft7z10zcz3zq';
+const sandboxOrganizationId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const sandboxUserId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+const sandboxPriceId = 'pri_01m2xtx7y26neywx40s3v3s5k3';
 const eventId = 'evt_01m2gcpjxz4wqjft7z10zcz3zq';
 const customerId = 'ctm_01h11111111111111111111111';
 const subscriptionId = 'sub_01h00000000000000000000000';
@@ -35,6 +38,10 @@ before(async () => {
     insert into public.organizations values ('${organizationId}', 'Synthetic Clinic');
     insert into public.organization_members (organization_id, user_id, role)
       values ('${organizationId}', '${userId}', 'admin');
+    insert into auth.users values ('${sandboxUserId}');
+    insert into public.organizations values ('${sandboxOrganizationId}', 'Synthetic Sandbox Clinic');
+    insert into public.organization_members (organization_id, user_id, role)
+      values ('${sandboxOrganizationId}', '${sandboxUserId}', 'admin');
   `);
   await db.exec(migration);
 });
@@ -107,4 +114,45 @@ test('a signed-webhook reduction can activate only the clinic bound to its refer
     ) as result`
   );
   assert.equal(duplicate.result, 'duplicate');
+});
+
+test('Sandbox checkout and webhook are price-bound and recorded as test mode', async () => {
+  const [prepared] = await serviceQuery(
+    `select public.careflow_service_prepare_billing_checkout(
+      '${sandboxOrganizationId}', '${sandboxUserId}', '${sandboxPriceId}'
+    ) as reference`
+  );
+  assert.match(prepared.reference, /^[0-9a-f-]{36}$/i);
+
+  const [applied] = await serviceQuery(
+    `select public.careflow_service_apply_paddle_event(
+      'evt_01m2xtx7y26neywx40s3v3s5k3', 'subscription.created', '${prepared.reference}',
+      'ctm_01m2xtx7y26neywx40s3v3s5k3', 'sub_01m2xtx7y26neywx40s3v3s5k3', '${sandboxPriceId}',
+      'CareFlow AI Clinic Subscription', 'CareFlow AI Clinic — Monthly', 'active',
+      '2026-10-19T20:00:00Z', null, '2026-09-19T20:00:00Z', true
+    ) as result`
+  );
+  assert.equal(applied.result, 'applied');
+
+  const [subscription] = (await db.query(
+    'select provider_variant_id, status, test_mode from public.organization_subscriptions where organization_id=$1',
+    [sandboxOrganizationId]
+  )).rows;
+  assert.deepEqual(subscription, {
+    provider_variant_id: sandboxPriceId,
+    status: 'active',
+    test_mode: true,
+  });
+
+  await assert.rejects(
+    serviceQuery(
+      `select public.careflow_service_apply_paddle_event(
+        'evt_01m2xtx7y26neywx40s3v3s5k4', 'subscription.updated', null,
+        'ctm_01m2xtx7y26neywx40s3v3s5k4', 'sub_01m2xtx7y26neywx40s3v3s5k4', '${sandboxPriceId}',
+        'CareFlow AI Clinic Subscription', 'CareFlow AI Clinic — Monthly', 'active',
+        '2026-10-20T20:00:00Z', null, '2026-09-20T20:00:00Z', false
+      ) as result`
+    ),
+    /Invalid Paddle billing event/
+  );
 });

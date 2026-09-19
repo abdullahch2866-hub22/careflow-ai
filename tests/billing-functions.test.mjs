@@ -9,8 +9,16 @@ const checkoutSource = fs.readFileSync(
   new URL('../supabase/functions/create-billing-checkout/index.ts', import.meta.url),
   'utf8'
 );
+const sandboxCheckoutSource = fs.readFileSync(
+  new URL('../supabase/functions/create-billing-checkout-sandbox/index.ts', import.meta.url),
+  'utf8'
+);
 const webhookSource = fs.readFileSync(
   new URL('../supabase/functions/billing-webhook/index.ts', import.meta.url),
+  'utf8'
+);
+const sandboxWebhookSource = fs.readFileSync(
+  new URL('../supabase/functions/billing-webhook-sandbox/index.ts', import.meta.url),
   'utf8'
 );
 
@@ -18,6 +26,9 @@ const organizationId = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa';
 const userId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const checkoutReference = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const priceId = 'pri_01m2gcpjxz4wqjft7z10zcz3zq';
+const sandboxPriceId = 'pri_01m2xtx7y26neywx40s3v3s5k3';
+const sandboxUserId = '5ebb6f53-f8b6-464d-af65-c19fa3a28e85';
+const sandboxEmail = 'careflow.test@example.com';
 const eventId = 'evt_01m2gcpjxz4wqjft7z10zcz3zq';
 const subscriptionId = 'sub_01h00000000000000000000000';
 const customerId = 'ctm_01h11111111111111111111111';
@@ -28,7 +39,10 @@ function checkoutFixture(options = {}) {
     auth: {
       async getUser() {
         if (options.authDenied) return { data: { user: null }, error: { message: 'Invalid session' } };
-        return { data: { user: { id: userId, email: 'admin@example.test' } }, error: null };
+        return { data: { user: {
+          id: options.actorId || (options.sandbox ? sandboxUserId : userId),
+          email: options.actorEmail || (options.sandbox ? sandboxEmail : 'admin@example.test'),
+        } }, error: null };
       },
     },
     from(table) {
@@ -56,13 +70,15 @@ function checkoutFixture(options = {}) {
       return { data: options.rateLimited ? null : checkoutReference, error: null };
     },
   };
-  const executable = stripTypeScriptTypes(checkoutSource.replace(/^import .*;\s*$/gm, ''), { mode: 'strip' })
+  const selectedCheckoutSource = options.sandbox ? sandboxCheckoutSource : checkoutSource;
+  const executable = stripTypeScriptTypes(selectedCheckoutSource.replace(/^import .*;\s*$/gm, ''), { mode: 'strip' })
     .replace('export default', 'const createBillingCheckout =');
   const context = vm.createContext({
     Response, Request,
     console: { error() {} },
     Deno: { env: { get(name) {
       if (name === 'PADDLE_WEBHOOK_SECRET' && !options.missingConfig) return 'synthetic-webhook-secret';
+      if (name === 'PADDLE_SANDBOX_WEBHOOK_SECRET' && !options.missingConfig) return 'synthetic-sandbox-webhook-secret';
       return null;
     } } },
     withSupabase(config, handler) { assert.equal(config.auth, 'user'); return handler; },
@@ -85,10 +101,12 @@ function checkoutFixture(options = {}) {
 function webhookFixture(options = {}) {
   const calls = { rpcs: [] };
   let handler;
-  const executable = stripTypeScriptTypes(webhookSource.replace(/^import .*;\s*$/gm, ''), { mode: 'strip' })
+  const selectedWebhookSource = options.sandbox ? sandboxWebhookSource : webhookSource;
+  const executable = stripTypeScriptTypes(selectedWebhookSource.replace(/^import .*;\s*$/gm, ''), { mode: 'strip' })
     .replace('Deno.serve(', 'captureHandler(');
   const environment = {
     PADDLE_WEBHOOK_SECRET: 'synthetic-webhook-secret',
+    PADDLE_SANDBOX_WEBHOOK_SECRET: 'synthetic-sandbox-webhook-secret',
     PADDLE_ENVIRONMENT: options.sandbox ? 'sandbox' : 'live',
     SUPABASE_URL: 'https://fixture.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'synthetic-service-role-key',
@@ -112,8 +130,11 @@ function webhookFixture(options = {}) {
   vm.runInContext(executable, context);
 
   async function sign(timestamp, body) {
+    const signingSecret = options.sandbox
+      ? environment.PADDLE_SANDBOX_WEBHOOK_SECRET
+      : environment.PADDLE_WEBHOOK_SECRET;
     const key = await crypto.subtle.importKey(
-      'raw', new TextEncoder().encode(environment.PADDLE_WEBHOOK_SECRET),
+      'raw', new TextEncoder().encode(signingSecret),
       { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
     );
     const signedPayload = `${timestamp}:${body}`;
@@ -202,6 +223,24 @@ test('checkout is rate-limited and refuses duplicate subscriptions', async () =>
   assert.equal(duplicate.calls.rpcs.length, 0);
 });
 
+test('Sandbox checkout is isolated to the designated test admin and price', async () => {
+  const wrongAccount = checkoutFixture({
+    sandbox: true,
+    actorId: userId,
+    actorEmail: 'admin@example.test',
+  });
+  assert.equal((await wrongAccount.invoke()).status, 403);
+  assert.equal(wrongAccount.calls.rpcs.length, 0);
+
+  const fixture = checkoutFixture({ sandbox: true });
+  const response = await fixture.invoke();
+  assert.equal(response.status, 200);
+  assert.equal(response.body.environment, 'sandbox');
+  assert.equal(response.body.price_id, sandboxPriceId);
+  assert.equal(response.body.customer_email, sandboxEmail);
+  assert.equal(fixture.calls.rpcs[0].args.p_price_id, sandboxPriceId);
+});
+
 test('webhook rejects forged and stale signatures before any database call', async () => {
   const forged = webhookFixture();
   assert.equal((await forged.invoke(subscriptionPayload(), { signature: '0'.repeat(64) })).status, 401);
@@ -239,6 +278,28 @@ test('a valid Paddle subscription event is reduced to safe billing fields', asyn
   assert.equal(call.args.p_test_mode, false);
   assert.equal(call.args.p_product_name, 'CareFlow AI Clinic Subscription');
   assert.equal(call.args.card_number, undefined);
+});
+
+test('Sandbox webhook accepts only the Sandbox price and records test mode', async () => {
+  const fixture = webhookFixture({ sandbox: true });
+  const response = await fixture.invoke(subscriptionPayload({
+    data: {
+      items: [{
+        price: { id: sandboxPriceId, name: 'CareFlow AI Clinic — Monthly' },
+        product: { name: 'CareFlow AI Clinic Subscription' },
+      }],
+    },
+  }));
+  assert.equal(response.status, 200);
+  assert.equal(response.body.result, 'applied');
+  assert.equal(fixture.calls.rpcs[0].args.p_price_id, sandboxPriceId);
+  assert.equal(fixture.calls.rpcs[0].args.p_test_mode, true);
+
+  const wrongPrice = webhookFixture({ sandbox: true });
+  const ignored = await wrongPrice.invoke(subscriptionPayload());
+  assert.equal(ignored.status, 200);
+  assert.equal(ignored.body.ignored, true);
+  assert.equal(wrongPrice.calls.rpcs.length, 0);
 });
 
 test('canceled subscriptions expire and unrelated Paddle prices are ignored', async () => {

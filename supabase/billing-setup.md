@@ -9,6 +9,19 @@ Public values used by the browser:
 
 The client-side token and price ID identify checkout configuration; they are not private API keys. Never place a Paddle API key, webhook secret, bank information, or identity document in the website or GitHub.
 
+## Isolated Sandbox test
+
+The hidden `?billing_test=sandbox` route is restricted server-side to the dedicated `careflow.test@example.com` admin account. It uses separate Paddle resources and does not replace the live checkout configuration:
+
+- Sandbox client-side token: `test_fb2fffc73e4082c03cd98733a95`
+- Sandbox product ID: `pro_01m2xtten2ynwnstyag55a6jdc`
+- Sandbox price ID: `pri_01m2xtx7y26neywx40s3v3s5k3`
+- Checkout function: `create-billing-checkout-sandbox`
+- Webhook function: `billing-webhook-sandbox`
+- Webhook secret name: `PADDLE_SANDBOX_WEBHOOK_SECRET`
+
+The Sandbox webhook accepts only the Sandbox price and always records `test_mode = true`. The live webhook continues to accept only the live price and records live mode.
+
 ## Final owner setup
 
 1. In Paddle, open **Developer tools → Notifications → New destination**.
