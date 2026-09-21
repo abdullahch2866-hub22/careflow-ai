@@ -44,6 +44,9 @@ The Sandbox webhook accepts only the Sandbox price and always records `test_mode
    - Name: `PADDLE_WEBHOOK_SECRET`
    - Value: the Paddle notification destination secret
 7. Send a Paddle test notification and confirm it returns HTTP 200.
-8. Sign in to CareFlow as a clinic admin, open **Billing**, and run one controlled live checkout.
+8. Sign in to CareFlow as a clinic admin and confirm that **Billing** can prepare
+   checkout, but do not complete a live purchase during technical verification.
+   Use the isolated Paddle Sandbox path for payment testing. A live purchase may
+   be completed only after the owner explicitly approves the real charge.
 
 CareFlow stores only Paddle customer, subscription and price identifiers, subscription status, renewal dates, and a short-lived one-time checkout reference. Paddle handles customers' payment details and applicable sales tax as Merchant of Record.

@@ -1,6 +1,6 @@
 # Saved-case regression checks
 
-Run with Node.js 22 or later; no package installation is needed:
+Run with Node.js 24 or later; no package installation is needed:
 
 ```sh
 node --test tests/cases.test.mjs
