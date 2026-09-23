@@ -7,6 +7,10 @@ import { PGlite } from '@electric-sql/pglite';
 
 const db = new PGlite();
 const migration = fs.readFileSync(new URL('../supabase/paid-access-gate.sql', import.meta.url), 'utf8');
+const uploadTriggerFix = fs.readFileSync(
+  new URL('../supabase/paid-upload-reservation-trigger-fix.sql', import.meta.url),
+  'utf8',
+);
 const liveUser = '11111111-1111-4111-8111-111111111111';
 const unpaidUser = '22222222-2222-4222-8222-222222222222';
 const ordinarySandboxMember = '33333333-3333-4333-8333-333333333333';
@@ -97,7 +101,12 @@ before(async () => {
       started_at timestamptz not null,
       finished_at timestamptz
     );
-    create table storage.objects (id uuid primary key default gen_random_uuid(), bucket_id text, name text);
+    create table storage.objects (
+      id uuid primary key default gen_random_uuid(),
+      bucket_id text,
+      name text,
+      owner_id text
+    );
 
     alter table public.organization_members enable row level security;
     alter table public.documents enable row level security;
@@ -144,6 +153,7 @@ before(async () => {
       ('${sandboxDocument}','${sandboxOrg}','Synthetic Sandbox.pdf');
   `);
   await db.exec(migration);
+  await db.exec(uploadTriggerFix);
 });
 
 after(() => db.close());
@@ -210,6 +220,41 @@ test('paid live members retain case updates and upload reservations', async () =
     /active CareFlow subscription/i,
   );
   await db.exec(`update public.organization_subscriptions set status='active' where organization_id='${liveOrg}'`);
+});
+
+test('Storage consumes a reservation using its JWT-derived object owner', async () => {
+  const [reservation] = await asUser(liveUser, 'select * from public.careflow_reserve_document_upload()');
+
+  // Supabase Storage can perform its internal metadata insert after the direct
+  // auth.uid() context is gone. owner_id is the persisted JWT subject.
+  await db.exec(`
+    set request.jwt.claim.sub = '';
+    insert into storage.objects(bucket_id,name,owner_id)
+    values ('documents','${reservation.storage_path}','${liveUser}')
+  `);
+
+  const consumed = (await db.query(
+    `select uploaded_at from careflow_private.document_upload_reservations where storage_path='${reservation.storage_path}'`,
+  )).rows[0];
+  assert.ok(consumed.uploaded_at);
+});
+
+test('Storage rejects an object owner who did not create the reservation', async () => {
+  const [reservation] = await asUser(liveUser, 'select * from public.careflow_reserve_document_upload()');
+
+  await assert.rejects(
+    db.exec(`
+      set request.jwt.claim.sub = '';
+      insert into storage.objects(bucket_id,name,owner_id)
+      values ('documents','${reservation.storage_path}','${unpaidUser}')
+    `),
+    /valid paid upload reservation/i,
+  );
+
+  const state = (await db.query(
+    `select uploaded_at from careflow_private.document_upload_reservations where storage_path='${reservation.storage_path}'`,
+  )).rows[0];
+  assert.equal(state.uploaded_at, null);
 });
 
 test('AI and staff service boundaries return no paid capability for an unpaid hospital', async () => {

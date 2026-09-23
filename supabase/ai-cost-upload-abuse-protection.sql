@@ -113,14 +113,25 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  -- Supabase Storage persists the authenticated JWT subject on the object.
+  -- The internal metadata insert does not reliably retain auth.uid() for
+  -- AFTER INSERT triggers, so bind the reservation to this documented owner.
+  v_owner_id text := nullif(new.owner_id, '');
 begin
   if new.bucket_id = 'documents' then
     update careflow_private.document_upload_reservations r
        set uploaded_at = clock_timestamp()
      where r.storage_path = new.name
-       and r.created_by = auth.uid()
+       and v_owner_id is not null
+       and r.created_by::text = v_owner_id
        and r.uploaded_at is null
-       and r.expires_at > clock_timestamp();
+       and r.expires_at > clock_timestamp()
+       and exists (
+         select 1 from public.organization_members om
+         where om.user_id = r.created_by
+           and om.organization_id = r.organization_id
+       );
     if not found then
       raise exception 'A valid upload reservation is required.' using errcode = '42501';
     end if;

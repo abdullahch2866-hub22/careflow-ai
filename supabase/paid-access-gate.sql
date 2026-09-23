@@ -198,15 +198,21 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  -- Supabase Storage persists the authenticated JWT subject on the object.
+  -- The internal metadata insert does not reliably retain auth.uid() for
+  -- AFTER INSERT triggers, so bind the reservation to this documented owner.
+  v_owner_id text := nullif(new.owner_id, '');
 begin
   if new.bucket_id = 'documents' then
     update careflow_private.document_upload_reservations r
        set uploaded_at = clock_timestamp()
      where r.storage_path = new.name
-       and r.created_by = auth.uid()
+       and v_owner_id is not null
+       and r.created_by::text = v_owner_id
        and r.uploaded_at is null
        and r.expires_at > clock_timestamp()
-       and careflow_private.organization_has_paid_access(r.organization_id, auth.uid());
+       and careflow_private.organization_has_paid_access(r.organization_id, r.created_by);
     if not found then
       raise exception 'A valid paid upload reservation is required.' using errcode = '42501';
     end if;
@@ -217,6 +223,12 @@ $$;
 
 revoke all on function careflow_private.mark_document_upload_used()
   from public, anon, authenticated, service_role, authenticator;
+
+drop trigger if exists careflow_mark_document_upload_used on storage.objects;
+create trigger careflow_mark_document_upload_used
+after insert on storage.objects
+for each row when (new.bucket_id = 'documents')
+execute function careflow_private.mark_document_upload_used();
 
 -- The processor is service-role only, but it still receives and validates the
 -- original user identity. Entitlement is checked before any AI attempt starts.
