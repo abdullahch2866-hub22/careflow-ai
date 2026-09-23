@@ -102,6 +102,22 @@
       margin-bottom: 30px;
     }
 
+    .paid-access-notice {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      margin: -8px 0 28px;
+      padding: 18px 20px;
+      border: 1px solid #f59e0b;
+      border-radius: 12px;
+      background: #fffbeb;
+      color: #78350f;
+    }
+    .paid-access-notice[data-state="checking"] { border-color: #93c5fd; background: #eff6ff; color: #1e3a8a; }
+    .paid-access-notice strong { display: block; margin-bottom: 4px; }
+    .paid-access-notice p { margin: 0; line-height: 1.5; }
+
     .cards {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -266,6 +282,7 @@
       .staff-invite-form { grid-template-columns: 1fr; }
       .member-row { align-items: flex-start; flex-direction: column; }
       .member-actions { width: 100%; justify-content: flex-start; }
+      .paid-access-notice { align-items: flex-start; flex-direction: column; }
       .main { min-width: 0; padding: 18px; }
       .sidebar { display: none; }
     }
@@ -454,6 +471,14 @@
       <section class="welcome" id="workspaceWelcome">
         <h1 id="workspaceTitle">Good evening</h1>
         <p id="workspaceSubtitle">Welcome to your CareFlow AI workspace.</p>
+      </section>
+
+      <section id="paidAccessNotice" class="paid-access-notice" data-state="checking" hidden aria-live="polite">
+        <div>
+          <strong id="paidAccessNoticeTitle">Checking CareFlow access…</strong>
+          <p id="paidAccessNoticeText">Document actions stay locked until the subscription check finishes.</p>
+        </div>
+        <button type="button" id="openBillingFromAccessBtn" class="button">Open Billing</button>
       </section>
 
       <section class="cards" id="dashboardCards">
@@ -718,6 +743,7 @@ const PADDLE_CLIENT_TOKEN = "live_30378679accd73c018c6de9b176";
 const PADDLE_PRICE_ID = "pri_01m2gcpjxz4wqjft7z10zcz3zq";
 const PADDLE_SANDBOX_CLIENT_TOKEN = "test_fb2fffc73e4082c03cd98733a95";
 const PADDLE_SANDBOX_PRICE_ID = "pri_01m2xtx7y26neywx40s3v3s5k3";
+const PADDLE_SANDBOX_TEST_USER_ID = "5ebb6f53-f8b6-464d-af65-c19fa3a28e85";
 const careflowLocation = (typeof window !== "undefined" && window.location) ? window.location : { hash: "", search: "" };
 const billingSandboxRequested = new URLSearchParams(careflowLocation.search || "").get("billing_test") === "sandbox";
 const paddleBillingConfig = billingSandboxRequested ? {
@@ -778,6 +804,7 @@ let loadingSettings = false;
 let settingsRequest = 0;
 let staffActionPending = false;
 let billingSubscription = null;
+let billingAccessResolved = false;
 let loadingBilling = false;
 let billingRequest = 0;
 let billingCheckoutPending = false;
@@ -791,6 +818,57 @@ let currentAuthUserId = null;
 const PROCESSING_STALE_MS = 10 * 60 * 1000;
 const WORKSPACE_STATE_KEY = "careflow.workspace.v2";
 const LEGACY_WORKSPACE_STATE_KEY = "careflow.workspace.v1";
+
+function hasPaidCareFlowAccess() {
+  if (!billingAccessResolved || !billingSubscription || !currentAuthUserId) return false;
+  if (!["active", "on_trial"].includes(billingSubscription.status)) return false;
+  if (billingSubscription.test_mode === true) {
+    return billingSubscription.provider_variant_id === PADDLE_SANDBOX_PRICE_ID &&
+      currentAuthUserId === PADDLE_SANDBOX_TEST_USER_ID;
+  }
+  return billingSubscription.test_mode === false &&
+    billingSubscription.provider_variant_id === PADDLE_PRICE_ID;
+}
+
+function paidAccessMessage() {
+  if (!billingAccessResolved) {
+    return "CareFlow is checking this hospital's subscription. Document and staff changes stay locked until the check finishes.";
+  }
+  const status = billingSubscription?.status || "none";
+  if (billingSubscription?.test_mode === true && currentAuthUserId !== PADDLE_SANDBOX_TEST_USER_ID) {
+    return "This Sandbox subscription is isolated to the designated CareFlow test account. Existing records remain read-only.";
+  }
+  if (status === "paused" || status === "past_due" || status === "unpaid") {
+    return "Billing needs attention. Existing records remain available, but uploads, AI processing, reviews, and staff changes are read-only.";
+  }
+  if (status === "cancelled" || status === "expired") {
+    return "This subscription is no longer active. Existing records remain available, but workspace changes are read-only.";
+  }
+  return "An active CareFlow subscription is required for uploads, AI processing, reviews, and staff changes. Existing records remain read-only.";
+}
+
+function renderPaidAccessNotice() {
+  const notice = document.getElementById("paidAccessNotice");
+  if (!notice) return;
+  if (!organizationId || hasPaidCareFlowAccess()) {
+    notice.hidden = true;
+    return;
+  }
+  notice.hidden = false;
+  notice.dataset.state = billingAccessResolved ? "required" : "checking";
+  document.getElementById("paidAccessNoticeTitle").textContent = billingAccessResolved
+    ? "CareFlow paid access is required"
+    : "Checking CareFlow access…";
+  document.getElementById("paidAccessNoticeText").textContent = paidAccessMessage();
+}
+
+function requirePaidCareFlowAccess(statusElementId) {
+  if (hasPaidCareFlowAccess()) return true;
+  const status = statusElementId ? document.getElementById(statusElementId) : null;
+  if (status) status.textContent = paidAccessMessage();
+  renderPaidAccessNotice();
+  return false;
+}
 
 function readWorkspaceState(userId) {
   try {
@@ -1241,17 +1319,19 @@ async function loadBilling() {
   const requestedOrganization = organizationId;
   const status = document.getElementById("billingStatus");
   status.textContent = "Loading billing...";
+  billingAccessResolved = false;
   loadingBilling = true;
   updateControls();
   try {
     const { data, error } = await supabaseClient
       .from("organization_subscriptions")
-      .select("organization_id, product_name, variant_name, status, renews_at, ends_at, test_mode")
+      .select("organization_id, provider_variant_id, product_name, variant_name, status, renews_at, ends_at, test_mode")
       .eq("organization_id", requestedOrganization)
       .maybeSingle();
     if (request !== billingRequest || requestedOrganization !== organizationId) return false;
     if (error) throw error;
     billingSubscription = data || null;
+    billingAccessResolved = true;
     renderBilling();
     status.textContent = billingReturnRequested && !data
       ? "Payment completed. Waiting for the secure subscription update; reload billing in a moment."
@@ -1264,6 +1344,7 @@ async function loadBilling() {
   } catch (error) {
     if (request === billingRequest && requestedOrganization === organizationId) {
       billingSubscription = null;
+      billingAccessResolved = false;
       renderBilling();
       status.textContent = "Could not load billing. " + (error.message || "Please try again.");
     }
@@ -1541,7 +1622,8 @@ async function invokeStaffManagement(payload) {
 }
 
 async function runStaffAction(payload, pendingMessage) {
-  if (!organizationId || !isOrganizationAdmin() || staffActionPending) return false;
+  if (!organizationId || !isOrganizationAdmin() || staffActionPending ||
+      !requirePaidCareFlowAccess("staffActionStatus")) return false;
   const requestedOrganization = organizationId;
   const status = document.getElementById("staffActionStatus");
   staffActionPending = true;
@@ -1567,7 +1649,8 @@ async function runStaffAction(payload, pendingMessage) {
 
 async function inviteHospitalUser(event) {
   event.preventDefault();
-  if (!isOrganizationAdmin() || staffActionPending) return;
+  if (!isOrganizationAdmin() || staffActionPending ||
+      !requirePaidCareFlowAccess("staffActionStatus")) return;
   const emailInput = document.getElementById("inviteUserEmail");
   const roleInput = document.getElementById("inviteUserRole");
   const email = emailInput.value.trim().toLowerCase();
@@ -1581,7 +1664,10 @@ async function inviteHospitalUser(event) {
 
 function updateControls() {
   const busy = uploading || saving || loadingCases || loadingActivity || loadingSettings || loadingBilling || billingCheckoutPending || staffActionPending || sourceViewerLoading || processingRequestPending;
-  document.getElementById("uploadBtn").disabled = busy || editing || !organizationId;
+  const paidAccess = hasPaidCareFlowAccess();
+  renderPaidAccessNotice();
+  document.getElementById("uploadBtn").disabled = busy || editing || !organizationId || !paidAccess;
+  document.getElementById("documentInput").disabled = busy || editing || !organizationId || !paidAccess;
   document.getElementById("reloadCasesBtn").disabled = busy || editing || !organizationId;
   const reloadActivityBtn = document.getElementById("reloadActivityBtn");
   if (reloadActivityBtn) reloadActivityBtn.disabled = busy || editing || !organizationId;
@@ -1596,19 +1682,25 @@ function updateControls() {
   const inviteUserBtn = document.getElementById("inviteUserBtn");
   const inviteUserEmail = document.getElementById("inviteUserEmail");
   const inviteUserRole = document.getElementById("inviteUserRole");
-  if (inviteUserBtn) inviteUserBtn.disabled = busy || !isOrganizationAdmin();
-  if (inviteUserEmail) inviteUserEmail.disabled = busy || !isOrganizationAdmin();
-  if (inviteUserRole) inviteUserRole.disabled = busy || !isOrganizationAdmin();
+  if (inviteUserBtn) inviteUserBtn.disabled = busy || !isOrganizationAdmin() || !paidAccess;
+  if (inviteUserEmail) inviteUserEmail.disabled = busy || !isOrganizationAdmin() || !paidAccess;
+  if (inviteUserRole) inviteUserRole.disabled = busy || !isOrganizationAdmin() || !paidAccess;
+  document.querySelectorAll(".staff-manage-control").forEach(function(control) {
+    control.disabled = busy || !isOrganizationAdmin() || !paidAccess;
+  });
   WORKSPACE_NAV_IDS.forEach(function(id) {
     const button = document.getElementById(id);
     if (button) button.disabled = busy || editing || !organizationId;
   });
-  document.querySelectorAll(".review-btn, .retry-processing-btn").forEach(function(button) {
+  document.querySelectorAll(".review-btn").forEach(function(button) {
     button.disabled = busy || editing;
+  });
+  document.querySelectorAll(".retry-processing-btn").forEach(function(button) {
+    button.disabled = busy || editing || !paidAccess;
   });
 
   const sourceUnavailable = busy || editing || !currentCase?.document_id;
-  const unavailable = sourceUnavailable || currentCase?.processing_status !== "ready" || typeof currentCase?.review_revision !== "number";
+  const unavailable = sourceUnavailable || !paidAccess || currentCase?.processing_status !== "ready" || typeof currentCase?.review_revision !== "number";
   const problem = approvalProblem(currentCase);
   document.getElementById("approveBtn").disabled = unavailable || !!problem || currentCase?.status === "Completed" || !document.getElementById("reviewConfirmed").checked;
   document.getElementById("correctionBtn").disabled = unavailable || currentCase?.status === "Correction Required";
@@ -1618,10 +1710,15 @@ function updateControls() {
   const retryButton = document.getElementById("retryProcessingBtn");
   if (retryButton) {
     retryButton.hidden = !canRetryProcessing(currentCase);
-    retryButton.disabled = busy || editing || !canRetryProcessing(currentCase);
+    retryButton.disabled = busy || editing || !paidAccess || !canRetryProcessing(currentCase);
   }
-  document.getElementById("approvalGuidance").textContent = currentCase ? problem || (currentCase.status === "Completed" ? "This case is completed. Editing details will reopen it for review." : "Check the saved details, then tick the confirmation box to enable approval.") : "";
-  ["saveDetailsBtn", "cancelEditBtn", "correctionsConfirmed", ...Object.keys(EDIT_FIELDS)].forEach(function(id) { document.getElementById(id).disabled = busy || !editing; });
+  document.getElementById("approvalGuidance").textContent = currentCase
+    ? (!paidAccess ? "Read-only: " + paidAccessMessage() : problem || (currentCase.status === "Completed" ? "This case is completed. Editing details will reopen it for review." : "Check the saved details, then tick the confirmation box to enable approval."))
+    : "";
+  ["saveDetailsBtn", "correctionsConfirmed", ...Object.keys(EDIT_FIELDS)].forEach(function(id) {
+    document.getElementById(id).disabled = busy || !editing || !paidAccess;
+  });
+  document.getElementById("cancelEditBtn").disabled = busy || !editing;
 }
 
 function clearReview() {
@@ -1857,7 +1954,8 @@ async function openCase(caseId) {
     if (error || !data) throw error || new Error("Case not found or access denied.");
     renderReview(data);
     persistWorkspaceState();
-    message.textContent = !data.document_id ? "This older case has no linked document. Review decisions are unavailable." :
+    message.textContent = !hasPaidCareFlowAccess() ? "Read-only: " + paidAccessMessage() :
+      !data.document_id ? "This older case has no linked document. Review decisions are unavailable." :
       data.processing_status === "failed" ? (data.processing_error_message || "AI processing failed. Retry processing to continue.") :
       data.processing_status === "processing" ? (processingIsStale(data) ? "AI processing appears interrupted. Retry processing." : "AI processing is still running.") :
       data.processing_status === "pending" ? "This document is waiting for AI processing." : "";
@@ -2069,6 +2167,7 @@ async function updateAuthUI() {
   organizationSettings = null;
   organizationMembers = [];
   billingSubscription = null;
+  billingAccessResolved = false;
   loadingActivity = false;
   loadingSettings = false;
   loadingBilling = false;
@@ -2141,13 +2240,13 @@ async function updateAuthUI() {
     document.querySelector(".layout").style.display = "flex";
     renderWorkspaceView();
     updateControls();
-    await Promise.all([loadCases(), loadDashboardMetrics()]);
+    await Promise.all([loadBilling(), loadCases(), loadDashboardMetrics()]);
     if (request !== authRequest || !organizationId) return;
     if (activeView === "activity") await loadActivityLog();
     if (activeView === "organization") await loadOrganizationSettings();
     if (activeView === "billing") {
       await loadOrganizationSettings();
-      await loadBilling();
+      if (!billingAccessResolved) await loadBilling();
     }
     if (activeView === "users") {
       await loadOrganizationSettings();
@@ -2239,6 +2338,10 @@ const reloadBillingBtn = document.getElementById("reloadBillingBtn");
 if (reloadBillingBtn) reloadBillingBtn.addEventListener("click", loadBilling);
 const billingCheckoutBtn = document.getElementById("billingCheckoutBtn");
 if (billingCheckoutBtn) billingCheckoutBtn.addEventListener("click", openBillingCheckout);
+const openBillingFromAccessBtn = document.getElementById("openBillingFromAccessBtn");
+if (openBillingFromAccessBtn) openBillingFromAccessBtn.addEventListener("click", function() {
+  switchWorkspaceView("billing");
+});
 const reloadUsersBtn = document.getElementById("reloadUsersBtn");
 if (reloadUsersBtn) reloadUsersBtn.addEventListener("click", async function() {
   await loadOrganizationSettings();
@@ -2266,7 +2369,8 @@ async function invokeDocumentProcessing(documentId) {
 
 async function retryCaseProcessing(caseId) {
   const row = savedCases.find(function(item) { return String(item.id) === String(caseId); });
-  if (!row || !canRetryProcessing(row) || processingRequestPending || !organizationId) return;
+  if (!row || !canRetryProcessing(row) || processingRequestPending || !organizationId ||
+      !requirePaidCareFlowAccess(currentCase && String(currentCase.id) === String(caseId) ? "reviewActionStatus" : "caseListStatus")) return;
   const selectedWasOpen = currentCase && String(currentCase.id) === String(row.id);
   const requestedOrganization = organizationId;
   const message = selectedWasOpen ? document.getElementById("reviewActionStatus") : document.getElementById("caseListStatus");
@@ -2294,12 +2398,17 @@ async function retryCaseProcessing(caseId) {
 }
 
 document.getElementById("uploadBtn").addEventListener("click", function() {
+  if (!requirePaidCareFlowAccess("uploadStatus")) return;
   document.getElementById("documentInput").click();
 });
 
 document.getElementById("documentInput").addEventListener("change", async function() {
   const file = this.files[0];
   if (!file || uploading || saving || loadingCases || processingRequestPending || editing || !organizationId) return;
+  if (!requirePaidCareFlowAccess("uploadStatus")) {
+    this.value = "";
+    return;
+  }
   const uploadStatus = document.getElementById("uploadStatus");
   const requestedOrganization = organizationId;
   const requestedAuth = authRequest;
@@ -2375,7 +2484,8 @@ function closeEditor() {
 }
 
 function editDetails() {
-  if (saving || uploading || loadingCases || processingRequestPending || editing || !currentCase?.document_id || currentCase.processing_status !== "ready") return;
+  if (saving || uploading || loadingCases || processingRequestPending || editing || !currentCase?.document_id || currentCase.processing_status !== "ready" ||
+      !requirePaidCareFlowAccess("reviewActionStatus")) return;
   editing = true;
   Object.entries(EDIT_FIELDS).forEach(function([id, field]) { document.getElementById(id).value = field === "review_notes" ? "" : currentCase[field] || ""; });
   document.getElementById("reviewConfirmed").checked = false;
@@ -2388,7 +2498,8 @@ function editDetails() {
 
 async function saveCorrections(event) {
   event.preventDefault();
-  if (!editing || saving || uploading || loadingCases || processingRequestPending || !currentCase?.document_id || currentCase.processing_status !== "ready" || !organizationId) return;
+  if (!editing || saving || uploading || loadingCases || processingRequestPending || !currentCase?.document_id || currentCase.processing_status !== "ready" || !organizationId ||
+      !requirePaidCareFlowAccess("reviewActionStatus")) return;
   const message = document.getElementById("reviewActionStatus");
   const payload = {};
   for (const [id, field] of Object.entries(EDIT_FIELDS)) {
@@ -2417,7 +2528,8 @@ async function saveCorrections(event) {
 }
 
 async function saveCaseStatus(newStatus) {
-  if (editing || saving || uploading || loadingCases || processingRequestPending || !currentCase?.document_id || currentCase.processing_status !== "ready" || !organizationId || currentCase.status === newStatus) return;
+  if (editing || saving || uploading || loadingCases || processingRequestPending || !currentCase?.document_id || currentCase.processing_status !== "ready" || !organizationId || currentCase.status === newStatus ||
+      !requirePaidCareFlowAccess("reviewActionStatus")) return;
   if (newStatus === "Completed" && (approvalProblem(currentCase) || !document.getElementById("reviewConfirmed").checked)) {
     document.getElementById("reviewActionStatus").textContent = approvalProblem(currentCase) || "Confirm you have checked the saved details before approving.";
     return;
@@ -2426,7 +2538,8 @@ async function saveCaseStatus(newStatus) {
 }
 
 async function saveCaseChange(payload, fromEditor) {
-  if (typeof currentCase?.review_revision !== "number") return;
+  if (typeof currentCase?.review_revision !== "number" ||
+      !requirePaidCareFlowAccess("reviewActionStatus")) return;
   const selectedId = currentCase.id;
   const selectedDocumentId = currentCase.document_id;
   const revision = currentCase.review_revision;

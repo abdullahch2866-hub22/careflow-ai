@@ -69,3 +69,12 @@ denial, invalid/oversized metadata, the downloaded size, and header/EOF checks
 before AI calls. The PDF envelopes in these tests are synthetic, not a full
 PDF parser test corpus. See `supabase/upload-protection.md` for scope and the
 separate Storage configuration requirement.
+
+## Paid-access gate
+
+`paid-access-gate.test.mjs` applies `supabase/paid-access-gate.sql` to a real
+in-memory PostgreSQL engine. It verifies live active access, read-only unpaid
+access, upload reservation checks, AI/staff service checks, and the exact
+Sandbox test-user exception. The browser and Edge Function fixtures separately
+confirm locked unpaid controls, HTTP 402 processing/staff responses, and a
+working isolated Sandbox test path. No live Supabase or Paddle request occurs.

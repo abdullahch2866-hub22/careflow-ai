@@ -1,5 +1,27 @@
 // Synthetic data only. This file is served by serve-fixture.mjs, never the app.
 const fixtureOrg = "fixture-hospital-a";
+const fixtureParams = new URLSearchParams(location.search);
+const fixtureSandboxUserId = "5ebb6f53-f8b6-464d-af65-c19fa3a28e85";
+const fixtureUserId = fixtureParams.has("sandbox-paid") ? fixtureSandboxUserId : "fixture-user";
+let fixtureSubscription = fixtureParams.has("unpaid") ? null : fixtureParams.has("sandbox-paid") ? {
+  organization_id: fixtureOrg,
+  provider_variant_id: "pri_01m2xtx7y26neywx40s3v3s5k3",
+  product_name: "CareFlow AI Clinic Subscription",
+  variant_name: "Sandbox test",
+  status: "active",
+  renews_at: "2026-10-22T00:00:00Z",
+  ends_at: null,
+  test_mode: true,
+} : {
+  organization_id: fixtureOrg,
+  provider_variant_id: "pri_01m2gcpjxz4wqjft7z10zcz3zq",
+  product_name: "CareFlow AI Clinic Subscription",
+  variant_name: "Founding Clinic",
+  status: "active",
+  renews_at: "2026-10-22T00:00:00Z",
+  ends_at: null,
+  test_mode: false,
+};
 let fixtureCases = JSON.parse(sessionStorage.getItem("careflow-fixture-cases") || "null") || [
   { id: 8, document_id: "fixture-document-8", organization_id: fixtureOrg, file_name: "Example_A.pdf", document_type: "Healthcare document", status: "Correction Required", created_at: "2026-08-31T00:22:45Z", patient_name: "Sample Patient A", document_date: "2026-08-12", insurance_information: "Sample insurer A", missing_information: "Sample missing contact" },
   { id: 7, document_id: "fixture-document-7", organization_id: fixtureOrg, file_name: "<img src=x onerror=alert(1)>.pdf", document_type: "Healthcare document", status: "Review", created_at: "2026-08-26T00:00:00Z", patient_name: "Sample Patient B", document_date: "2026-08-12", insurance_information: "Sample insurer B", missing_information: null },
@@ -31,7 +53,7 @@ function recordFixtureQuery(entry) {
 }
 function storeFixtureCases() { sessionStorage.setItem("careflow-fixture-cases", JSON.stringify(fixtureCases)); }
 function fixtureQuery(table) {
-  let filters = [], predicates = [], action = "select", payload, single = false, limit = 1000, order = [], selectOptions = {};
+  let filters = [], predicates = [], action = "select", payload, single = false, maybeSingle = false, limit = 1000, order = [], selectOptions = {};
   const builder = {
     select(_columns, options = {}) { selectOptions = options; return builder; },
     eq(column, value) { filters.push([column, value]); return builder; },
@@ -41,12 +63,20 @@ function fixtureQuery(table) {
     order(column, options) { order.push([column, options.ascending]); return builder; },
     limit(value) { limit = value; return builder; },
     single() { single = true; return builder; },
+    maybeSingle() { single = true; maybeSingle = true; return builder; },
     insert(value) { action = "insert"; payload = value; return builder; },
     update(value) { action = "update"; payload = value; return builder; },
     async then(resolve, reject) {
       try {
         recordFixtureQuery(action + " " + table + " " + JSON.stringify(filters));
         if (table === "organization_members") return resolve({ data: { organization_id: fixtureOrg }, error: null });
+        if (table === "organization_subscriptions") {
+          const row = fixtureSubscription && filters.every(([key, value]) => fixtureSubscription[key] === value)
+            ? structuredClone(fixtureSubscription)
+            : null;
+          if (single && !row && !maybeSingle) return resolve({ data: null, error: { message: "Fixture: expected one row" } });
+          return resolve({ data: single ? row : row ? [row] : [], error: null });
+        }
         if (table === "documents" && action === "insert") return resolve({ data: { id: "fixture-document-new" }, error: null });
         if (table !== "cases") throw new Error("Unexpected fixture table");
         if (action === "insert") {
@@ -88,7 +118,7 @@ function fixtureQuery(table) {
 }
 window.supabase = { createClient() { return {
   auth: {
-    async getUser() { return { data: { user: fixtureSignedOut ? null : { id: "fixture-user" } }, error: null }; },
+    async getUser() { return { data: { user: fixtureSignedOut ? null : { id: fixtureUserId } }, error: null }; },
     async signInWithPassword() { throw new Error("Fixture does not accept credentials"); },
     async signOut() { fixtureSignedOut = true; fixtureAuthCallback("SIGNED_OUT"); return { error: null }; },
     onAuthStateChange(callback) { fixtureAuthCallback = callback; return { data: { subscription: { unsubscribe() {} } } }; }

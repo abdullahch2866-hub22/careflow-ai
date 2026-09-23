@@ -80,6 +80,11 @@ function fixture(options = {}) {
     },
     async rpc(name, args) {
       calls.rpcs.push({ name, args });
+      if (name === 'careflow_service_has_paid_access') {
+        return options.paidAccessError
+          ? { data: null, error: { message: 'Synthetic billing lookup failure' } }
+          : { data: options.paidAccess !== false, error: null };
+      }
       if (name === 'careflow_service_find_auth_user') {
         return {
           data: options.authUserExists ? [{ user_id: targetId, email: targetEmail }] : [],
@@ -155,6 +160,26 @@ test('malformed JSON and invalid fields are rejected before privileged RPCs', as
     assert.equal((await f.invoke(body)).status, 400);
     assert.equal(f.calls.rpcs.length, 0);
   }
+});
+
+test('unpaid hospitals cannot invite, change, or remove staff', async () => {
+  for (const body of [
+    { action: 'invite', email: targetEmail, role: 'staff' },
+    { action: 'change_role', email: targetEmail, role: 'admin' },
+    { action: 'remove', email: targetEmail },
+  ]) {
+    const f = fixture({ paidAccess: false });
+    const response = await f.invoke(body);
+    assert.equal(response.status, 402);
+    assert.match(response.body.error, /active CareFlow subscription/i);
+    assert.equal(rpcCalls(f, 'careflow_service_has_paid_access').length, 1);
+    assert.equal(f.calls.invites.length, 0);
+    assert.equal(f.calls.rpcs.length, 1);
+  }
+
+  const unavailable = fixture({ paidAccessError: true });
+  assert.equal((await unavailable.invoke({ action: 'remove', email: targetEmail })).status, 503);
+  assert.equal(unavailable.calls.rpcs.length, 1);
 });
 
 test('role and removal lookups never reveal whether an external email has an account', async () => {

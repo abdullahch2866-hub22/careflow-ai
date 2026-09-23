@@ -80,6 +80,7 @@ function fixture(options = {}) {
           attempt_number: options.processingAttempts || 1,
           retryable: state === 'processing',
           message: state === 'retry_limit' ? 'Retry limit reached. Contact your CareFlow administrator.' :
+            state === 'subscription_required' ? 'An active CareFlow subscription is required. Open Billing to restore processing access.' :
             state === 'not_retryable' ? 'This document must be re-uploaded.' :
             state === 'processing' ? 'Processing is already running.' :
             state === 'ready' ? 'Document is already processed.' : 'Access denied.',
@@ -193,6 +194,16 @@ test('retry limits and non-retryable failures are returned without reading the s
     assert.equal(f.calls.provider, 0);
     assert.equal(f.calls.downloads.length, 0);
   }
+});
+
+test('an unpaid processing claim returns payment required before Storage or AI is used', async () => {
+  const f = fixture({ claimState: 'subscription_required' });
+  const response = await f.invoke();
+  assert.equal(response.status, 402);
+  assert.match(response.body.error, /active CareFlow subscription/i);
+  assert.equal(f.calls.provider, 0);
+  assert.equal(f.calls.infos.length, 0);
+  assert.equal(f.calls.downloads.length, 0);
 });
 
 test('a record pointing at another hospital folder fails the claimed run before reading Storage', async () => {

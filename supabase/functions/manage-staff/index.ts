@@ -65,6 +65,24 @@ export default {
         return Response.json({ error: "Role must be admin or staff" }, { status: 400 });
       }
 
+      const { data: hasPaidAccess, error: paidAccessError } = await ctx.supabaseAdmin.rpc(
+        "careflow_service_has_paid_access",
+        {
+          p_organization_id: actorMembership.organization_id,
+          p_actor_id: actor.id,
+        },
+      );
+      if (paidAccessError) {
+        console.error("Could not verify CareFlow subscription", paidAccessError);
+        return Response.json({ error: "Could not verify the CareFlow subscription" }, { status: 503 });
+      }
+      if (hasPaidAccess !== true) {
+        return Response.json(
+          { error: "An active CareFlow subscription is required. Open Billing to manage staff access." },
+          { status: 402 },
+        );
+      }
+
       const findAuthUser = async () => {
         const { data, error } = await ctx.supabaseAdmin.rpc("careflow_service_find_auth_user", { p_email: email });
         if (error) throw error;

@@ -20,7 +20,8 @@ healthcare privacy review for the countries and customers involved.
 ## Verified controls
 
 - All 109 baseline automated tests passed before readiness changes; all 113
-  tests passed after the new safeguards were added.
+  readiness tests passed after those safeguards, and all 122 tests pass on the
+  local paid-access release candidate.
 - Hospital-scoped database access, private document viewing, strong password
   rules, upload quotas, processing retries, human review, and audit history have
   automated regression coverage.
@@ -32,6 +33,9 @@ healthcare privacy review for the countries and customers involved.
   missing source objects.
 - No committed private API keys, webhook secrets, bank details, or patient
   documents were found.
+- A paid-access gate release candidate now has local automated coverage for
+  live entitlements, read-only unpaid access, and the isolated Sandbox tester.
+  It has not been published or applied to live Supabase.
 
 ## Open items that were not changed
 
@@ -41,9 +45,9 @@ healthcare privacy review for the countries and customers involved.
   old testing. They appear non-operational, but no data was deleted.
 - The latest health snapshot remains `watch` because the orphan counter is
   intentionally honest. Monitoring was not weakened to force a green status.
-- Billing is connected but is not yet an entitlement gate for every workspace
-  action. Trial/pilot access policy must be decided before enforcing a payment
-  lock, so no customer was locked out during this audit.
+- The paid-access gate exists only on the local release branch. The published
+  site and live Supabase remain unchanged until the owner separately approves
+  deployment, so no customer was locked out during this local build.
 - Production data retention, malware scanning, contractual terms, incident
   ownership, and customer-specific compliance obligations still require a
   business/legal decision rather than an automatic code change.

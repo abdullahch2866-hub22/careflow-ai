@@ -152,7 +152,8 @@ export default {
             attempt_number: claim.attempt_number,
           });
         }
-        const status = claim.claim_state === "retry_limit" || ["rate_limit", "daily_limit", "busy"].includes(claim.claim_state) ? 429
+        const status = claim.claim_state === "subscription_required" ? 402
+          : claim.claim_state === "retry_limit" || ["rate_limit", "daily_limit", "busy"].includes(claim.claim_state) ? 429
           : claim.claim_state === "not_retryable" || claim.claim_state === "reviewed" ? 409
           : 404;
         return Response.json({

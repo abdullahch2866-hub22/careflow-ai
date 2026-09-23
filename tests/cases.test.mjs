@@ -62,7 +62,7 @@ function makeDocument() {
     createElement: tag => new Element(tag),
     querySelector: selector => ({ '.header': header, '.layout': layout })[selector] || null,
     querySelectorAll: selector => {
-      const allowed = new Set(['.review-btn', '.retry-processing-btn', '.review-btn, .retry-processing-btn']);
+      const allowed = new Set(['.review-btn', '.retry-processing-btn', '.review-btn, .retry-processing-btn', '.staff-manage-control']);
       assert.ok(allowed.has(selector), 'Unexpected selector: ' + selector);
       const classes = selector.split(',').map(value => value.trim().replace(/^\./, ''));
       return all(body).filter(element => classes.some(name => element.className.split(' ').includes(name)));
@@ -74,8 +74,9 @@ function makeDocument() {
 async function flush() { for (let i = 0; i < 12; i++) await new Promise(resolve => setImmediate(resolve)); }
 async function page(store = new Map(), search = '') {
   const document = makeDocument();
+  const fixtureLocation = { search, hash: '' };
   const context = vm.createContext({
-    window: { addEventListener() {} }, document, location: { search }, URLSearchParams, structuredClone, crypto,
+    window: { addEventListener() {}, location: fixtureLocation }, document, location: fixtureLocation, URLSearchParams, structuredClone, crypto,
     sessionStorage: { getItem: key => store.get(key), setItem: (key, value) => store.set(key, value) },
     console,
     fetch() { throw new Error('Network forbidden in this test'); }
@@ -222,6 +223,33 @@ test('sign-out clears patient fields and cases; signed-out startup reads no case
   const signedOut = await page(new Map(), '?signed-out');
   assert.equal(signedOut.queries().length, 0);
   assert.equal(signedOut.element('uploadBtn').disabled, true);
+});
+
+test('an unpaid hospital stays readable while every paid write control is locked', async () => {
+  const p = await page(new Map(), '?unpaid');
+  assert.equal(p.element('paidAccessNotice').hidden, false);
+  assert.match(p.text('paidAccessNoticeText'), /active CareFlow subscription.*read-only/i);
+  assert.equal(p.element('uploadBtn').disabled, true);
+  assert.equal(p.element('documentInput').disabled, true);
+  assert.ok(p.document.querySelectorAll('.review-btn').every(button => button.disabled === false));
+
+  await p.review(7);
+  assert.equal(p.text('reviewPatientName'), 'Sample Patient B');
+  assert.equal(p.element('viewSourceBtn').disabled, false);
+  assert.equal(p.element('editDetailsBtn').disabled, true);
+  assert.equal(p.element('approveBtn').disabled, true);
+  await p.click('viewSourceBtn');
+  assert.equal(p.element('sourceViewerModal').hidden, false);
+  await p.run('saveCaseStatus("Completed")');
+  assert.match(p.text('reviewActionStatus'), /Read-only|active CareFlow subscription/i);
+  assert.equal(p.queries().some(query => query.startsWith('update cases')), false);
+});
+
+test('the isolated paid Sandbox test identity keeps the full test workflow enabled', async () => {
+  const p = await page(new Map(), '?sandbox-paid&billing_test=sandbox');
+  assert.equal(p.element('paidAccessNotice').hidden, true);
+  assert.equal(p.element('uploadBtn').disabled, false);
+  assert.equal(p.run('hasPaidCareFlowAccess()'), true);
 });
 
 test('new upload keeps earlier cases and opens persisted AI details', async () => {

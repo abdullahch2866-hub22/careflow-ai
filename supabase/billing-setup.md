@@ -22,6 +22,33 @@ The hidden `?billing_test=sandbox` route is restricted server-side to the dedica
 
 The Sandbox webhook accepts only the Sandbox price and always records `test_mode = true`. The live webhook continues to accept only the live price and records live mode.
 
+## Paid-access gate release order
+
+The paid-access gate is prepared in `supabase/paid-access-gate.sql`. It keeps
+account creation, Billing, organization details, existing cases, activity, and
+protected source viewing available without a paid entitlement. Uploads, AI
+processing, case changes, approvals, and staff mutations require:
+
+- a live `active` or `on_trial` subscription for the fixed live price; or
+- an `active`/`on_trial` Sandbox subscription for the fixed Sandbox price **and**
+  the designated Sandbox test user ID.
+
+Statuses such as `past_due`, `paused`, `unpaid`, `cancelled`, and `expired` are
+read-only. This prevents an ordinary hospital from using a Sandbox record as a
+free production entitlement.
+
+For a later approved deployment, keep this order so the application fails
+closed without a temporary broken staff-management path:
+
+1. Apply `supabase/paid-access-gate.sql` in Supabase.
+2. Deploy the updated `process-document` and `manage-staff` Edge Functions.
+3. Publish the updated website.
+4. Rehearse with `careflow.test@example.com` and fictional documents only.
+5. Verify an unpaid fictional clinic can read existing records but cannot write.
+
+These steps are deployment instructions only. Building or committing the file
+does not apply it to Supabase or publish the website.
+
 ## Final owner setup
 
 1. In Paddle, open **Developer tools → Notifications → New destination**.
