@@ -34,6 +34,13 @@ export default {
         return Response.json({ error: "Only hospital admins can manage billing" }, { status: 403 });
       }
 
+      if ((Deno.env.get("PADDLE_LIVE_CHECKOUT_ENABLED") || "").toLowerCase() !== "true") {
+        return Response.json(
+          { error: "Live checkout is waiting for Paddle verification and domain approval." },
+          { status: 503 }
+        );
+      }
+
       if (!Deno.env.get("PADDLE_WEBHOOK_SECRET")) {
         return Response.json(
           { error: "Secure payments are being activated. Please try again later." },

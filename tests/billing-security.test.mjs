@@ -103,9 +103,14 @@ test('workspace opens only the fixed Paddle price through the protected checkout
   assert.match(html, /PADDLE_CLIENT_TOKEN = "live_30378679accd73c018c6de9b176"/);
   assert.match(html, /PADDLE_SANDBOX_CLIENT_TOKEN = "test_fb2fffc73e4082c03cd98733a95"/);
   assert.match(html, /PADDLE_SANDBOX_PRICE_ID = "pri_01m2xtx7y26neywx40s3v3s5k3"/);
+  assert.match(html, /LIVE_CHECKOUT_ENABLED = false/);
+  assert.match(checkout, /PADDLE_LIVE_CHECKOUT_ENABLED/);
   assert.match(html, /Paddle\.Environment\.set\("sandbox"\)/);
+  assert.match(html, /provider_customer_id/);
+  assert.match(html, /pwCustomer: paddleRetainCustomer\(\)/);
+  assert.match(html, /Paddle\.Update\(\{ pwCustomer: paddleRetainCustomer\(\) \}\)/);
   assert.ok(
-    html.indexOf('window.Paddle.Environment.set("sandbox")') < html.indexOf('window.Paddle.Initialize({'),
+    html.indexOf('window.Paddle.Environment.set("sandbox")') < html.indexOf('window.Paddle.Initialize(initializeOptions)'),
     'Paddle Sandbox mode must be selected before Paddle initializes'
   );
   assert.match(html, /event\?\.name === "checkout\.loaded"[\s\S]*Secure Paddle checkout opened\./);
@@ -113,6 +118,11 @@ test('workspace opens only the fixed Paddle price through the protected checkout
   assert.match(html, /event\?\.name === "checkout\.closed"[\s\S]*Secure checkout closed\. No payment was made\./);
   assert.match(html, /Opening secure Paddle checkout[\s\S]*Paddle\.Checkout\.open\(checkoutOptions\)/);
   assert.doesNotMatch(html, /PADDLE_(API_KEY|WEBHOOK_SECRET)/);
+  assert.match(webhook, /p_test_mode: false/);
+  assert.doesNotMatch(webhook, /PADDLE_ENVIRONMENT/);
+  assert.match(webhook, /https:\/\/api\.paddle\.com\/ips/);
+  assert.match(webhook, /cf-connecting-ip/);
+  assert.doesNotMatch(webhook, /34\.237\.3\.244/);
   assert.match(pricing, /\$99[\s\S]*USD \/ month/);
   assert.match(pricing, /cdn\.paddle\.com\/paddle\/v2\/paddle\.js/);
 });

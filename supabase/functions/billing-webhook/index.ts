@@ -3,6 +3,8 @@ import { createClient } from "npm:@supabase/supabase-js@2.57.4";
 
 const MAX_WEBHOOK_BYTES = 1024 * 1024;
 const SIGNATURE_TOLERANCE_SECONDS = 300;
+const PADDLE_IPS_URL = "https://api.paddle.com/ips";
+const PADDLE_IP_CACHE_MILLISECONDS = 5 * 60 * 1000;
 const PADDLE_PRICE_ID = "pri_01m2gcpjxz4wqjft7z10zcz3zq";
 const SUPPORTED_EVENTS = new Set([
   "subscription.created",
@@ -15,6 +17,44 @@ const SUPPORTED_EVENTS = new Set([
   "subscription.canceled",
 ]);
 const PADDLE_STATUSES = new Set(["active", "canceled", "past_due", "paused", "trialing"]);
+let paddleIpv4Cache: { expiresAt: number; addresses: Set<string> } | null = null;
+
+function validIpv4(value: string) {
+  const parts = value.split(".");
+  return parts.length === 4 && parts.every(part =>
+    /^(0|[1-9][0-9]{0,2})$/.test(part) && Number(part) <= 255
+  );
+}
+
+function requestIpv4(req: Request) {
+  const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "";
+  const value = (req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip") || forwarded).trim();
+  return validIpv4(value) ? value : "";
+}
+
+async function paddleIpv4Addresses() {
+  const now = Date.now();
+  if (paddleIpv4Cache && paddleIpv4Cache.expiresAt > now) return paddleIpv4Cache.addresses;
+
+  const response = await fetch(PADDLE_IPS_URL, {
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!response.ok) throw new Error(`Paddle IP endpoint returned ${response.status}`);
+  const payload = await response.json();
+  const cidrs = payload?.data?.ipv4_cidrs;
+  if (!Array.isArray(cidrs)) throw new Error("Paddle IP endpoint returned invalid data");
+
+  const addresses = new Set<string>();
+  for (const cidr of cidrs) {
+    if (typeof cidr !== "string" || !cidr.endsWith("/32")) continue;
+    const address = cidr.slice(0, -3);
+    if (validIpv4(address)) addresses.add(address);
+  }
+  if (addresses.size === 0) throw new Error("Paddle IP endpoint returned no IPv4 addresses");
+  paddleIpv4Cache = { expiresAt: now + PADDLE_IP_CACHE_MILLISECONDS, addresses };
+  return addresses;
+}
 
 function constantTimeEqual(left: string, right: string) {
   if (left.length !== right.length) return false;
@@ -94,10 +134,25 @@ Deno.serve(async (req: Request) => {
   const secret = Deno.env.get("PADDLE_WEBHOOK_SECRET") || "";
   const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-  const testMode = (Deno.env.get("PADDLE_ENVIRONMENT") || "live").toLowerCase() === "sandbox";
   if (!secret || !supabaseUrl || !serviceRoleKey) {
     console.error("Paddle billing webhook is not configured");
     return Response.json({ error: "Webhook unavailable" }, { status: 503 });
+  }
+
+  const sourceIp = requestIpv4(req);
+  if (!sourceIp) {
+    return Response.json({ error: "Untrusted webhook source" }, { status: 403 });
+  }
+  try {
+    const allowedAddresses = await paddleIpv4Addresses();
+    if (!allowedAddresses.has(sourceIp)) {
+      return Response.json({ error: "Untrusted webhook source" }, { status: 403 });
+    }
+  } catch (error) {
+    console.error("Could not verify Paddle webhook source", {
+      message: error instanceof Error ? error.message : "Unknown error"
+    });
+    return Response.json({ error: "Webhook source verification unavailable" }, { status: 503 });
   }
 
   const contentLength = Number(req.headers.get("Content-Length") || "0");
@@ -196,7 +251,7 @@ Deno.serve(async (req: Request) => {
     p_renews_at: renewsAt,
     p_ends_at: endsAt,
     p_provider_updated_at: providerUpdatedAt,
-    p_test_mode: testMode,
+    p_test_mode: false,
   });
 
   if (error) {

@@ -77,6 +77,7 @@ function checkoutFixture(options = {}) {
     Response, Request,
     console: { error() {} },
     Deno: { env: { get(name) {
+      if (name === 'PADDLE_LIVE_CHECKOUT_ENABLED') return options.liveCheckoutDisabled ? 'false' : 'true';
       if (name === 'PADDLE_WEBHOOK_SECRET' && !options.missingConfig) return 'synthetic-webhook-secret';
       if (name === 'PADDLE_SANDBOX_WEBHOOK_SECRET' && !options.missingConfig) return 'synthetic-sandbox-webhook-secret';
       return null;
@@ -99,7 +100,7 @@ function checkoutFixture(options = {}) {
 }
 
 function webhookFixture(options = {}) {
-  const calls = { rpcs: [] };
+  const calls = { rpcs: [], ipLookups: 0 };
   let handler;
   const selectedWebhookSource = options.sandbox ? sandboxWebhookSource : webhookSource;
   const executable = stripTypeScriptTypes(selectedWebhookSource.replace(/^import .*;\s*$/gm, ''), { mode: 'strip' })
@@ -112,7 +113,7 @@ function webhookFixture(options = {}) {
     SUPABASE_SERVICE_ROLE_KEY: 'synthetic-service-role-key',
   };
   const context = vm.createContext({
-    Response, Request, Date, TextEncoder, Uint8Array, crypto, RegExp,
+    Response, Request, Date, TextEncoder, Uint8Array, crypto, RegExp, AbortSignal,
     console: { error() {} },
     Deno: { env: { get(name) { return environment[name] || null; } } },
     captureHandler(value) { handler = value; },
@@ -125,6 +126,12 @@ function webhookFixture(options = {}) {
             : { data: options.result || 'applied', error: null };
         },
       };
+    },
+    async fetch(url) {
+      assert.equal(url, 'https://api.paddle.com/ips');
+      calls.ipLookups += 1;
+      if (options.ipLookupFailure) return new Response('', { status: 503 });
+      return Response.json({ data: { ipv4_cidrs: ['34.237.3.244/32'] } });
     },
   });
   vm.runInContext(executable, context);
@@ -144,16 +151,17 @@ function webhookFixture(options = {}) {
 
   return {
     calls,
-    async invoke(payload, options = {}) {
+    async invoke(payload, requestOptions = {}) {
       const body = JSON.stringify(payload);
-      const timestamp = options.timestamp || String(Math.floor(Date.now() / 1000));
-      const signature = options.signature ?? await sign(timestamp, body);
+      const timestamp = requestOptions.timestamp || String(Math.floor(Date.now() / 1000));
+      const signature = requestOptions.signature ?? await sign(timestamp, body);
       const response = await handler(new Request('https://fixture.invalid/webhook', {
         method: 'POST',
         body,
         headers: {
           'Content-Type': 'application/json',
           'Paddle-Signature': `ts=${timestamp};h1=${signature}`,
+          'cf-connecting-ip': options.sourceIp || '34.237.3.244',
         },
       }));
       return { status: response.status, body: await response.json() };
@@ -213,6 +221,10 @@ test('checkout returns a one-time server-owned reference for the fixed Paddle pr
 });
 
 test('checkout is rate-limited and refuses duplicate subscriptions', async () => {
+  const disabled = checkoutFixture({ liveCheckoutDisabled: true });
+  assert.equal((await disabled.invoke()).status, 503);
+  assert.equal(disabled.calls.rpcs.length, 0);
+
   const missing = checkoutFixture({ missingConfig: true });
   assert.equal((await missing.invoke()).status, 503);
   assert.equal(missing.calls.rpcs.length, 0);
@@ -249,6 +261,22 @@ test('webhook rejects forged and stale signatures before any database call', asy
   const stale = webhookFixture();
   assert.equal((await stale.invoke(subscriptionPayload(), { timestamp: '1' })).status, 401);
   assert.equal(stale.calls.rpcs.length, 0);
+});
+
+test('live webhook dynamically allows only current Paddle source IPs', async () => {
+  const untrusted = webhookFixture({ sourceIp: '203.0.113.10' });
+  assert.equal((await untrusted.invoke(subscriptionPayload())).status, 403);
+  assert.equal(untrusted.calls.rpcs.length, 0);
+  assert.equal(untrusted.calls.ipLookups, 1);
+
+  const unavailable = webhookFixture({ ipLookupFailure: true });
+  assert.equal((await unavailable.invoke(subscriptionPayload())).status, 503);
+  assert.equal(unavailable.calls.rpcs.length, 0);
+
+  const trusted = webhookFixture();
+  assert.equal((await trusted.invoke(subscriptionPayload())).status, 200);
+  assert.equal(trusted.calls.ipLookups, 1);
+  assert.equal(trusted.calls.rpcs.length, 1);
 });
 
 test('signed Paddle simulations are acknowledged without changing production billing', async () => {

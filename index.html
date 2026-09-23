@@ -744,6 +744,7 @@ const PADDLE_PRICE_ID = "pri_01m2gcpjxz4wqjft7z10zcz3zq";
 const PADDLE_SANDBOX_CLIENT_TOKEN = "test_fb2fffc73e4082c03cd98733a95";
 const PADDLE_SANDBOX_PRICE_ID = "pri_01m2xtx7y26neywx40s3v3s5k3";
 const PADDLE_SANDBOX_TEST_USER_ID = "5ebb6f53-f8b6-464d-af65-c19fa3a28e85";
+const LIVE_CHECKOUT_ENABLED = false;
 const careflowLocation = (typeof window !== "undefined" && window.location) ? window.location : { hash: "", search: "" };
 const billingSandboxRequested = new URLSearchParams(careflowLocation.search || "").get("billing_test") === "sandbox";
 const paddleBillingConfig = billingSandboxRequested ? {
@@ -1296,6 +1297,34 @@ function billingStatusLabel(status) {
   return labels[status] || "Not connected";
 }
 
+function paddleCustomerId(value) {
+  return typeof value === "string" && /^ctm_[a-z0-9]{26}$/.test(value) ? value : "";
+}
+
+function paddleRetainCustomer() {
+  if (paddleBillingConfig.environment !== "live") return null;
+  const customerId = paddleCustomerId(billingSubscription?.provider_customer_id);
+  return customerId ? { id: customerId } : {};
+}
+
+function checkoutEnvironmentReady() {
+  return paddleBillingConfig.environment === "sandbox" || LIVE_CHECKOUT_ENABLED;
+}
+
+function syncPaddleRetainCustomer() {
+  if (!paddleInitialized || paddleBillingConfig.environment !== "live" ||
+      !window.Paddle || typeof window.Paddle.Update !== "function") return false;
+  try {
+    window.Paddle.Update({ pwCustomer: paddleRetainCustomer() });
+    return true;
+  } catch (error) {
+    console.error("Paddle customer synchronization failed", {
+      message: error instanceof Error ? error.message : "Unknown error"
+    });
+    return false;
+  }
+}
+
 function renderBilling() {
   const status = billingSubscription?.status || "none";
   const badge = document.getElementById("billingStatusBadge");
@@ -1309,7 +1338,11 @@ function renderBilling() {
   badge.dataset.billingStatus = status;
   const checkout = document.getElementById("billingCheckoutBtn");
   checkout.hidden = !isOrganizationAdmin();
-  checkout.textContent = billingSubscription && status !== "expired" ? "Subscription already connected" : "Open secure checkout →";
+  checkout.textContent = billingSubscription && status !== "expired"
+    ? "Subscription already connected"
+    : checkoutEnvironmentReady()
+      ? "Open secure checkout →"
+      : "Live checkout pending Paddle verification";
   updateControls();
 }
 
@@ -1325,7 +1358,7 @@ async function loadBilling() {
   try {
     const { data, error } = await supabaseClient
       .from("organization_subscriptions")
-      .select("organization_id, provider_variant_id, product_name, variant_name, status, renews_at, ends_at, test_mode")
+      .select("organization_id, provider_customer_id, provider_variant_id, product_name, variant_name, status, renews_at, ends_at, test_mode")
       .eq("organization_id", requestedOrganization)
       .maybeSingle();
     if (request !== billingRequest || requestedOrganization !== organizationId) return false;
@@ -1333,6 +1366,7 @@ async function loadBilling() {
     billingSubscription = data || null;
     billingAccessResolved = true;
     renderBilling();
+    syncPaddleRetainCustomer();
     status.textContent = billingReturnRequested && !data
       ? "Payment completed. Waiting for the secure subscription update; reload billing in a moment."
       : "";
@@ -1362,6 +1396,10 @@ async function openBillingCheckout() {
       (billingSubscription && billingSubscription.status !== "expired")) return false;
   const requestedOrganization = organizationId;
   const status = document.getElementById("billingStatus");
+  if (!checkoutEnvironmentReady()) {
+    status.textContent = "Live checkout will open after Paddle verification and domain approval are confirmed.";
+    return false;
+  }
   billingCheckoutPending = true;
   status.textContent = "Preparing secure checkout...";
   updateControls();
@@ -1423,7 +1461,7 @@ function initializePaddle() {
       if (!window.Paddle.Environment || typeof window.Paddle.Environment.set !== "function") return false;
       window.Paddle.Environment.set("sandbox");
     }
-    window.Paddle.Initialize({
+    const initializeOptions = {
       token: paddleBillingConfig.clientToken,
       eventCallback: function(event) {
         const status = document.getElementById("billingStatus");
@@ -1449,7 +1487,11 @@ function initializePaddle() {
         if (status) status.textContent = "Payment completed. Confirming your subscription securely...";
         setTimeout(loadBilling, 2000);
       }
-    });
+    };
+    if (paddleBillingConfig.environment === "live") {
+      initializeOptions.pwCustomer = paddleRetainCustomer();
+    }
+    window.Paddle.Initialize(initializeOptions);
     paddleInitialized = true;
     return true;
   } catch (error) {
@@ -1678,7 +1720,7 @@ function updateControls() {
   const reloadBillingBtn = document.getElementById("reloadBillingBtn");
   if (reloadBillingBtn) reloadBillingBtn.disabled = busy || editing || !organizationId;
   const billingCheckoutBtn = document.getElementById("billingCheckoutBtn");
-  if (billingCheckoutBtn) billingCheckoutBtn.disabled = busy || !isOrganizationAdmin() || !!(billingSubscription && billingSubscription.status !== "expired");
+  if (billingCheckoutBtn) billingCheckoutBtn.disabled = busy || !isOrganizationAdmin() || !checkoutEnvironmentReady() || !!(billingSubscription && billingSubscription.status !== "expired");
   const inviteUserBtn = document.getElementById("inviteUserBtn");
   const inviteUserEmail = document.getElementById("inviteUserEmail");
   const inviteUserRole = document.getElementById("inviteUserRole");
@@ -2620,12 +2662,15 @@ supabaseClient.auth.onAuthStateChange(function(event, session) {
     activityLogEntries = [];
     organizationSettings = null;
     organizationMembers = [];
+    billingSubscription = null;
+    billingAccessResolved = false;
     loadingCases = false;
     loadingActivity = false;
     loadingSettings = false;
     staffActionPending = false;
     processingRequestPending = false;
     currentAuthUserId = null;
+    syncPaddleRetainCustomer();
     activeView = "dashboard";
     clearWorkspaceState();
     resetDashboardMetrics();
