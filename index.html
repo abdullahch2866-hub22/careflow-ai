@@ -744,7 +744,8 @@ const PADDLE_PRICE_ID = "pri_01m2gcpjxz4wqjft7z10zcz3zq";
 const PADDLE_SANDBOX_CLIENT_TOKEN = "test_fb2fffc73e4082c03cd98733a95";
 const PADDLE_SANDBOX_PRICE_ID = "pri_01m2xtx7y26neywx40s3v3s5k3";
 const PADDLE_SANDBOX_TEST_USER_ID = "5ebb6f53-f8b6-464d-af65-c19fa3a28e85";
-const LIVE_CHECKOUT_ENABLED = false;
+const PADDLE_LIVE_TEST_USER_ID = "91943cf3-7e02-4b61-9efe-345bb9b2262a";
+const LIVE_CHECKOUT_ENABLED = true;
 const careflowLocation = (typeof window !== "undefined" && window.location) ? window.location : { hash: "", search: "" };
 const billingSandboxRequested = new URLSearchParams(careflowLocation.search || "").get("billing_test") === "sandbox";
 const paddleBillingConfig = billingSandboxRequested ? {
@@ -1308,7 +1309,8 @@ function paddleRetainCustomer() {
 }
 
 function checkoutEnvironmentReady() {
-  return paddleBillingConfig.environment === "sandbox" || LIVE_CHECKOUT_ENABLED;
+  return paddleBillingConfig.environment === "sandbox" ||
+    (LIVE_CHECKOUT_ENABLED && currentAuthUserId === PADDLE_LIVE_TEST_USER_ID);
 }
 
 function syncPaddleRetainCustomer() {

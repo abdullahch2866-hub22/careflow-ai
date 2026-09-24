@@ -2,6 +2,9 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "npm:@supabase/server@1.5.1";
 
 const PADDLE_PRICE_ID = "pri_01m2gcpjxz4wqjft7z10zcz3zq";
+const CONTROLLED_LIVE_TEST_ENABLED = true;
+const LIVE_TEST_USER_ID = "91943cf3-7e02-4b61-9efe-345bb9b2262a";
+const LIVE_TEST_ORGANIZATION_ID = "b9c0bcab-31f1-4d59-bfa9-e9be88153edf";
 
 function isUuid(value: unknown) {
   return typeof value === "string" &&
@@ -34,10 +37,16 @@ export default {
         return Response.json({ error: "Only hospital admins can manage billing" }, { status: 403 });
       }
 
-      if ((Deno.env.get("PADDLE_LIVE_CHECKOUT_ENABLED") || "").toLowerCase() !== "true") {
+      if (!CONTROLLED_LIVE_TEST_ENABLED) {
         return Response.json(
           { error: "Live checkout is waiting for Paddle verification and domain approval." },
           { status: 503 }
+        );
+      }
+      if (actor.id !== LIVE_TEST_USER_ID || membership.organization_id !== LIVE_TEST_ORGANIZATION_ID) {
+        return Response.json(
+          { error: "Live checkout is temporarily restricted to the designated CareFlow test workspace." },
+          { status: 403 }
         );
       }
 

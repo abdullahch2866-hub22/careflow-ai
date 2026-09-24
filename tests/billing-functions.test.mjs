@@ -22,8 +22,8 @@ const sandboxWebhookSource = fs.readFileSync(
   'utf8'
 );
 
-const organizationId = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa';
-const userId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const organizationId = 'b9c0bcab-31f1-4d59-bfa9-e9be88153edf';
+const userId = '91943cf3-7e02-4b61-9efe-345bb9b2262a';
 const checkoutReference = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const priceId = 'pri_01m2gcpjxz4wqjft7z10zcz3zq';
 const sandboxPriceId = 'pri_01m2xtx7y26neywx40s3v3s5k3';
@@ -77,7 +77,6 @@ function checkoutFixture(options = {}) {
     Response, Request,
     console: { error() {} },
     Deno: { env: { get(name) {
-      if (name === 'PADDLE_LIVE_CHECKOUT_ENABLED') return options.liveCheckoutDisabled ? 'false' : 'true';
       if (name === 'PADDLE_WEBHOOK_SECRET' && !options.missingConfig) return 'synthetic-webhook-secret';
       if (name === 'PADDLE_SANDBOX_WEBHOOK_SECRET' && !options.missingConfig) return 'synthetic-sandbox-webhook-secret';
       return null;
@@ -221,9 +220,9 @@ test('checkout returns a one-time server-owned reference for the fixed Paddle pr
 });
 
 test('checkout is rate-limited and refuses duplicate subscriptions', async () => {
-  const disabled = checkoutFixture({ liveCheckoutDisabled: true });
-  assert.equal((await disabled.invoke()).status, 503);
-  assert.equal(disabled.calls.rpcs.length, 0);
+  const wrongAccount = checkoutFixture({ actorId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' });
+  assert.equal((await wrongAccount.invoke()).status, 403);
+  assert.equal(wrongAccount.calls.rpcs.length, 0);
 
   const missing = checkoutFixture({ missingConfig: true });
   assert.equal((await missing.invoke()).status, 503);
