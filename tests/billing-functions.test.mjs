@@ -219,11 +219,15 @@ test('checkout returns a one-time server-owned reference for the fixed Paddle pr
   assert.equal(call.args.p_price_id, priceId);
 });
 
-test('checkout is rate-limited and refuses duplicate subscriptions', async () => {
-  const wrongAccount = checkoutFixture({ actorId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' });
-  assert.equal((await wrongAccount.invoke()).status, 403);
-  assert.equal(wrongAccount.calls.rpcs.length, 0);
+test('checkout accepts any authenticated hospital admin', async () => {
+  const otherAdminId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const otherAdmin = checkoutFixture({ actorId: otherAdminId });
+  assert.equal((await otherAdmin.invoke()).status, 200);
+  assert.equal(otherAdmin.calls.rpcs.length, 1);
+  assert.equal(otherAdmin.calls.rpcs[0].args.p_user_id, otherAdminId);
+});
 
+test('checkout is rate-limited and refuses duplicate subscriptions', async () => {
   const missing = checkoutFixture({ missingConfig: true });
   assert.equal((await missing.invoke()).status, 503);
   assert.equal(missing.calls.rpcs.length, 0);

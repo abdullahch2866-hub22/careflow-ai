@@ -103,13 +103,10 @@ test('workspace opens only the fixed Paddle price through the protected checkout
   assert.match(html, /PADDLE_CLIENT_TOKEN = "live_30378679accd73c018c6de9b176"/);
   assert.match(html, /PADDLE_SANDBOX_CLIENT_TOKEN = "test_fb2fffc73e4082c03cd98733a95"/);
   assert.match(html, /PADDLE_SANDBOX_PRICE_ID = "pri_01m2xtx7y26neywx40s3v3s5k3"/);
-  assert.match(html, /PADDLE_LIVE_TEST_USER_ID = "91943cf3-7e02-4b61-9efe-345bb9b2262a"/);
   assert.match(html, /LIVE_CHECKOUT_ENABLED = true/);
-  assert.match(html, /LIVE_CHECKOUT_ENABLED && currentAuthUserId === PADDLE_LIVE_TEST_USER_ID/);
-  assert.match(checkout, /CONTROLLED_LIVE_TEST_ENABLED = true/);
-  assert.match(checkout, /LIVE_TEST_USER_ID = "91943cf3-7e02-4b61-9efe-345bb9b2262a"/);
-  assert.match(checkout, /LIVE_TEST_ORGANIZATION_ID = "b9c0bcab-31f1-4d59-bfa9-e9be88153edf"/);
-  assert.match(checkout, /actor\.id !== LIVE_TEST_USER_ID \|\| membership\.organization_id !== LIVE_TEST_ORGANIZATION_ID/);
+  assert.match(html, /function checkoutEnvironmentReady\(\) \{\s*return paddleBillingConfig\.environment === "sandbox" \|\| LIVE_CHECKOUT_ENABLED;\s*\}/);
+  assert.doesNotMatch(html, /PADDLE_LIVE_TEST_USER_ID|91943cf3-7e02-4b61-9efe-345bb9b2262a/);
+  assert.doesNotMatch(checkout, /CONTROLLED_LIVE_TEST_ENABLED|LIVE_TEST_USER_ID|LIVE_TEST_ORGANIZATION_ID|temporarily restricted/);
   assert.match(html, /Paddle\.Environment\.set\("sandbox"\)/);
   assert.match(html, /provider_customer_id/);
   assert.match(html, /pwCustomer: paddleRetainCustomer\(\)/);
